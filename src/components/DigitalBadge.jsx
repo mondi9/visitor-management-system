@@ -1,5 +1,4 @@
-import React from 'react';
-import { CheckCircle, Calendar, User, Briefcase, Phone, ArrowLeft } from 'lucide-react';
+import { CheckCircle, Calendar, User, Briefcase, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
 
 const DigitalBadge = ({ visitor, onBack }) => {

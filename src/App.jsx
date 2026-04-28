@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import CheckInForm from './components/CheckInForm';
 import DigitalBadge from './components/DigitalBadge';
 import AdminDashboard from './components/AdminDashboard';
-import { Users, Settings, UserPlus } from 'lucide-react';
+import { Users, UserPlus } from 'lucide-react';
 
 const Navigation = () => {
   const location = useLocation();
-  const isAdmin = location.pathname === '/admin';
+  const isAdmin = location.pathname.startsWith('/admin');
+
+  if (isAdmin) return null;
 
   return (
     <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-xl text-white px-6 py-4 rounded-full shadow-2xl z-50 flex items-center space-x-8 border border-white/10">
@@ -55,6 +57,9 @@ function App() {
         <Routes>
           <Route path="/" element={<CheckInFlow />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/visitors" element={<AdminDashboard />} />
+          <Route path="/admin/notifications" element={<AdminDashboard />} />
+          <Route path="/admin/settings" element={<AdminDashboard />} />
         </Routes>
         <Navigation />
       </div>
