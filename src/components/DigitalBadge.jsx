@@ -11,9 +11,13 @@ const DigitalBadge = ({ visitor, onBack }) => {
         <div className="absolute -left-8 -bottom-8 w-32 h-32 bg-black/10 rounded-full blur-2xl"></div>
         
         <div className="relative z-10">
-          <div className="bg-white text-emerald-600 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl ring-4 ring-emerald-400">
-            <CheckCircle size={48} />
-          </div>
+          {visitor.photo ? (
+            <img src={visitor.photo} alt="Visitor" className="w-24 h-24 rounded-full mx-auto mb-6 object-cover shadow-xl ring-4 ring-emerald-400 bg-white" />
+          ) : (
+            <div className="bg-white text-emerald-600 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl ring-4 ring-emerald-400">
+              <CheckCircle size={48} />
+            </div>
+          )}
           <h2 className="text-3xl font-extrabold tracking-tight">Visitor Badge</h2>
           <p className="text-emerald-50 mt-2 font-medium">Successfully Checked In</p>
         </div>

@@ -192,9 +192,13 @@ const AdminDashboard = () => {
                         <tr key={visitor.id} className="hover:bg-slate-50/50 transition-colors group">
                           <td className="px-6 py-5">
                             <div className="flex items-center space-x-3">
-                              <div className="w-11 h-11 bg-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600 font-black text-lg shadow-sm">
-                                {visitor.name.charAt(0)}
-                              </div>
+                              {visitor.photo ? (
+                                <img src={visitor.photo} alt={visitor.name} className="w-11 h-11 object-cover rounded-2xl shadow-sm border border-slate-200" />
+                              ) : (
+                                <div className="w-11 h-11 bg-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600 font-black text-lg shadow-sm">
+                                  {visitor.name.charAt(0)}
+                                </div>
+                              )}
                               <div>
                                 <p className="font-bold text-slate-800">{visitor.name}</p>
                                 <p className="text-xs text-slate-400 font-medium">{visitor.phone}</p>

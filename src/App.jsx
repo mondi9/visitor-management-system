@@ -37,15 +37,19 @@ const CheckInFlow = () => {
 
   if (currentVisitor) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <DigitalBadge visitor={currentVisitor} onBack={() => setCurrentVisitor(null)} />
+      <div className="min-h-screen bg-slate-50 flex flex-col p-4 pb-32 pt-12">
+        <div className="my-auto w-full">
+          <DigitalBadge visitor={currentVisitor} onBack={() => setCurrentVisitor(null)} />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <CheckInForm onCheckInSuccess={setCurrentVisitor} />
+    <div className="min-h-screen bg-slate-50 flex flex-col p-4 pb-32 pt-12">
+      <div className="my-auto w-full">
+        <CheckInForm onCheckInSuccess={setCurrentVisitor} />
+      </div>
     </div>
   );
 };

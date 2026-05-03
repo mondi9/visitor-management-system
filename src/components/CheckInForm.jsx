@@ -1,17 +1,67 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { UserPlus, Phone, ClipboardList, UserCheck, Loader2 } from 'lucide-react';
+import { UserPlus, Phone, ClipboardList, UserCheck, Loader2, Mail, Camera, X } from 'lucide-react';
+import emailjs from '@emailjs/browser';
 
 const CheckInForm = ({ onCheckInSuccess }) => {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
     purpose: '',
-    hostName: ''
+    hostName: '',
+    hostEmail: ''
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [photo, setPhoto] = useState(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  const startCamera = async () => {
+    setIsCameraOpen(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      setError("Could not access camera. Please allow permissions.");
+      setIsCameraOpen(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject;
+      const tracks = stream.getTracks();
+      tracks.forEach(track => track.stop());
+    }
+    setIsCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      
+      // Use fixed size for small base64 footprint
+      canvas.width = 320;
+      canvas.height = 240;
+      
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Compress to 70% quality JPEG
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      setPhoto(dataUrl);
+      stopCamera();
+    }
+  };
+  
+  const clearPhoto = () => setPhoto(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -21,12 +71,37 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     try {
       const docRef = await addDoc(collection(db, 'visitors'), {
         ...formData,
+        photo: photo,
         checkInTime: serverTimestamp(),
         checkOutTime: null,
         status: 'Active'
       });
       
-      onCheckInSuccess({ id: docRef.id, ...formData, checkInTime: new Date() });
+      try {
+        // IMPORTANT: Replace these with your actual EmailJS credentials
+        const SERVICE_ID = 'service_1yt2lto';
+        const TEMPLATE_ID = 'YOUR_TEMPLATE_ID';
+        const PUBLIC_KEY = 'YOUR_PUBLIC_KEY';
+        
+        if (SERVICE_ID !== 'YOUR_SERVICE_ID') {
+          await emailjs.send(
+            SERVICE_ID,
+            TEMPLATE_ID,
+            {
+              host_name: formData.hostName,
+              host_email: formData.hostEmail,
+              visitor_name: formData.name,
+              purpose: formData.purpose,
+            },
+            PUBLIC_KEY
+          );
+        }
+      } catch (emailErr) {
+        console.error("Failed to send email notification:", emailErr);
+        // We don't fail the check-in if the email fails, just log it
+      }
+
+      onCheckInSuccess({ id: docRef.id, ...formData, photo, checkInTime: new Date() });
     } catch (err) {
       console.error("Error adding document: ", err);
       setError('Failed to check in. Please check your Firebase configuration.');
@@ -120,6 +195,82 @@ const CheckInForm = ({ onCheckInSuccess }) => {
               />
             </div>
           </div>
+
+          <div className="relative">
+            <label className="text-sm font-medium text-slate-700 mb-1 block ml-1">Host Email</label>
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                required
+                type="email"
+                name="hostEmail"
+                value={formData.hostEmail}
+                onChange={handleChange}
+                placeholder="host@company.com"
+                className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Camera Section */}
+        <div className="space-y-4 border-t border-slate-100 pt-6 mt-6">
+          <label className="text-sm font-medium text-slate-700 block ml-1">Visitor Photo (Optional)</label>
+          
+          {!photo && !isCameraOpen && (
+            <button
+              type="button"
+              onClick={startCamera}
+              className="w-full py-4 border-2 border-dashed border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl font-bold flex items-center justify-center space-x-2 transition-colors shadow-sm"
+            >
+              <Camera size={20} />
+              <span>Take a Photo</span>
+            </button>
+          )}
+
+          {isCameraOpen && (
+            <div className="relative bg-black rounded-xl overflow-hidden aspect-video shadow-inner animate-in fade-in zoom-in duration-300">
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute bottom-4 left-0 right-0 flex justify-center space-x-4">
+                <button
+                  type="button"
+                  onClick={capturePhoto}
+                  className="bg-white text-indigo-600 px-6 py-2 rounded-full font-bold shadow-lg hover:bg-indigo-50 transition-colors"
+                >
+                  Capture
+                </button>
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="bg-slate-800/80 text-white px-6 py-2 rounded-full font-bold shadow-lg hover:bg-slate-900 transition-colors backdrop-blur-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {photo && (
+            <div className="flex justify-center animate-in fade-in zoom-in duration-300">
+              <div className="relative inline-block">
+                <img src={photo} alt="Visitor" className="w-32 h-32 object-cover rounded-2xl shadow-md border-4 border-white" />
+                <button
+                  type="button"
+                  onClick={clearPhoto}
+                  className="absolute -top-2 -right-2 bg-rose-500 hover:bg-rose-600 text-white p-1.5 rounded-full shadow-lg transition-colors transform hover:scale-105 active:scale-95"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+          
+          <canvas ref={canvasRef} className="hidden" />
         </div>
 
         <button
