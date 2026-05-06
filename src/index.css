@@ -1,1 +1,49 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Light mode tokens */
+:root {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-subtle: #f1f5f9;
+  --bg-input: #f8fafc;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --border-color: #e2e8f0;
+  --border-subtle: #f1f5f9;
+  --shadow-color: rgba(0,0,0,0.06);
+  --nav-bg: rgba(255,255,255,0.85);
+  --sidebar-bg: #ffffff;
+  --accent: #4f46e5;
+  --accent-light: #eef2ff;
+  --accent-text: #4f46e5;
+}
+
+/* Dark mode tokens */
+[data-theme=dark] {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-card: #1e2130;
+  --bg-subtle: #252836;
+  --bg-input: #252836;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border-color: #2d3044;
+  --border-subtle: #252836;
+  --shadow-color: rgba(0,0,0,0.4);
+  --nav-bg: rgba(26,29,39,0.92);
+  --sidebar-bg: #1a1d27;
+  --accent: #6366f1;
+  --accent-light: rgba(99,102,241,0.15);
+  --accent-text: #818cf8;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
