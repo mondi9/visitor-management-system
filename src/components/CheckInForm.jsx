@@ -273,20 +273,33 @@ const CheckInForm = ({ onCheckInSuccess }) => {
           <canvas ref={canvasRef} className="hidden" />
         </div>
 
-        <button
-          disabled={loading}
-          type="submit"
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-200 transition-all transform active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-        >
-          {loading ? (
-            <>
-              <Loader2 className="animate-spin" size={20} />
-              <span>Processing...</span>
-            </>
-          ) : (
-            <span>Check In Now</span>
-          )}
-        </button>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setFormData({ name: '', phone: '', purpose: '', hostName: '', hostEmail: '' });
+              setPhoto(null);
+            }}
+            className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-4 rounded-xl transition-all transform active:scale-[0.98] flex items-center justify-center space-x-2"
+          >
+            <X size={20} />
+            <span>Clear</span>
+          </button>
+          <button
+            disabled={loading}
+            type="submit"
+            className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-200 transition-all transform active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="animate-spin" size={20} />
+                <span>Processing...</span>
+              </>
+            ) : (
+              <span>Check In Now</span>
+            )}
+          </button>
+        </div>
       </form>
     </div>
   );

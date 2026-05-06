@@ -9,25 +9,33 @@ const Navigation = () => {
   const location = useLocation();
   const isAdmin = location.pathname.startsWith('/admin');
 
-  if (isAdmin) return null;
-
   return (
-    <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-xl text-white px-6 py-4 rounded-full shadow-2xl z-50 flex items-center space-x-8 border border-white/10">
-      <Link 
-        to="/" 
-        className={`flex items-center space-x-2 transition-all ${!isAdmin ? 'text-indigo-400 scale-110' : 'text-slate-400 hover:text-white'}`}
-      >
-        <UserPlus size={20} />
-        <span className="font-bold text-sm">Check-In</span>
-      </Link>
-      <div className="w-px h-6 bg-white/10"></div>
-      <Link 
-        to="/admin" 
-        className={`flex items-center space-x-2 transition-all ${isAdmin ? 'text-indigo-400 scale-110' : 'text-slate-400 hover:text-white'}`}
-      >
-        <Users size={20} />
-        <span className="font-bold text-sm">Dashboard</span>
-      </Link>
+    <nav className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-b border-slate-200 z-50 transition-all duration-300">
+      <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-100">
+            <UserPlus size={20} />
+          </div>
+          <span className="font-black text-slate-800 tracking-tight text-lg">SecurePass</span>
+        </div>
+        
+        <div className="flex items-center space-x-2 bg-slate-100 p-1 rounded-2xl">
+          <Link 
+            to="/" 
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all ${location.pathname === '/' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            <UserPlus size={18} />
+            <span className="text-sm">Check-In</span>
+          </Link>
+          <Link 
+            to="/admin" 
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all ${isAdmin ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            <Users size={18} />
+            <span className="text-sm">Admin</span>
+          </Link>
+        </div>
+      </div>
     </nav>
   );
 };
@@ -37,7 +45,7 @@ const CheckInFlow = () => {
 
   if (currentVisitor) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col p-4 pb-32 pt-12">
+      <div className="min-h-screen bg-slate-50 flex flex-col p-4 pt-24">
         <div className="my-auto w-full">
           <DigitalBadge visitor={currentVisitor} onBack={() => setCurrentVisitor(null)} />
         </div>
@@ -46,7 +54,7 @@ const CheckInFlow = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col p-4 pb-32 pt-12">
+    <div className="min-h-screen bg-slate-50 flex flex-col p-4 pt-24">
       <div className="my-auto w-full">
         <CheckInForm onCheckInSuccess={setCurrentVisitor} />
       </div>

@@ -68,13 +68,22 @@ const DigitalBadge = ({ visitor, onBack }) => {
         </div>
 
         <div className="pt-4">
-          <button
-            onClick={onBack}
-            className="w-full py-4 px-6 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 shadow-lg shadow-slate-200"
-          >
-            <ArrowLeft size={18} />
-            <span>New Check-In</span>
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => window.print()}
+              className="flex-1 py-4 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 shadow-lg shadow-indigo-100"
+            >
+              <CheckCircle size={18} />
+              <span>Print Badge</span>
+            </button>
+            <button
+              onClick={onBack}
+              className="flex-1 py-4 px-6 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 shadow-lg shadow-slate-200"
+            >
+              <ArrowLeft size={18} />
+              <span>New Check-In</span>
+            </button>
+          </div>
         </div>
       </div>
       
