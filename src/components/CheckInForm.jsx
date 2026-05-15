@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { UserPlus, Phone, ClipboardList, UserCheck, Loader2, Mail, Camera, X } from 'lucide-react';
+import { collection, addDoc, serverTimestamp, query, where, getDocs, setDoc, doc } from 'firebase/firestore';
+import { UserPlus, Phone, ClipboardList, UserCheck, Loader2, Mail, Camera, X, Search } from 'lucide-react';
 import emailjs from '@emailjs/browser';
 
 const CheckInForm = ({ onCheckInSuccess }) => {
@@ -13,6 +13,7 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     hostEmail: ''
   });
   const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -58,19 +59,71 @@ const CheckInForm = ({ onCheckInSuccess }) => {
 
   const clearPhoto = () => setPhoto(null);
 
+  const lookupVisitor = async (identifier) => {
+    if (!identifier || identifier.length < 5) return;
+    setSearching(true);
+    try {
+      const q = query(
+        collection(db, 'visitor_accounts'),
+        where('phone', '==', identifier)
+      );
+      const emailQ = query(
+        collection(db, 'visitor_accounts'),
+        where('email', '==', identifier)
+      );
+
+      let snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        snapshot = await getDocs(emailQ);
+      }
+
+      if (!snapshot.empty) {
+        const data = snapshot.docs[0].data();
+        setFormData(prev => ({
+          ...prev,
+          name: data.name || prev.name,
+          phone: data.phone || prev.phone,
+          email: data.email || identifier.includes('@') ? identifier : prev.email
+        }));
+        if (data.photo) setPhoto(data.photo);
+      }
+    } catch (err) {
+      console.error("Lookup error:", err);
+    } finally {
+      setSearching(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
+    const allottedDuration = 60; // Default 60 minutes
+    const checkInTime = new Date();
+    const expiryTime = new Date(checkInTime.getTime() + allottedDuration * 60000);
+
     try {
+      // 1. Add to active visitors
       const docRef = await addDoc(collection(db, 'visitors'), {
         ...formData,
         photo: photo,
         checkInTime: serverTimestamp(),
+        expiryTime: expiryTime,
+        allottedDuration: allottedDuration,
         checkOutTime: null,
         status: 'Active'
       });
+
+      // 2. Save/Update visitor account
+      const accountId = formData.phone.replace(/[^0-9]/g, '') || formData.name.toLowerCase().replace(/\s/g, '_');
+      await setDoc(doc(db, 'visitor_accounts', accountId), {
+        name: formData.name,
+        phone: formData.phone,
+        email: formData.email || '',
+        photo: photo,
+        lastVisit: serverTimestamp()
+      }, { merge: true });
 
       try {
         const SERVICE_ID = 'service_1yt2lto';
@@ -139,9 +192,7 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     >
       {/* Header */}
       <div className="bg-indigo-600 p-8 text-white text-center">
-        <div className="bg-white/20 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
-          <UserPlus size={32} />
-        </div>
+        <img src="/logo.png" alt="SecurePass Logo" className="w-16 h-16 rounded-2xl mx-auto mb-4 border-2 border-white/20 shadow-xl" />
         <h2 className="text-2xl font-bold">Visitor Check-In</h2>
         <p className="text-indigo-100 mt-2">Welcome! Please provide your details.</p>
       </div>
@@ -167,9 +218,13 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                   name={name}
                   value={formData[name]}
                   onChange={handleChange}
+                  onBlur={(e) => (name === 'phone' || name === 'email') && lookupVisitor(e.target.value)}
                   placeholder={placeholder}
                   style={inputStyle}
                 />
+                {(searching && (name === 'phone' || name === 'email')) && (
+                  <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin text-indigo-500" size={16} />
+                )}
               </div>
             </div>
           ))}

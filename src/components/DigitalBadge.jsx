@@ -13,14 +13,19 @@ const DigitalBadge = ({ visitor, onBack }) => {
         <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
         <div className="absolute -left-8 -bottom-8 w-32 h-32 bg-black/10 rounded-full blur-2xl"></div>
 
-        <div className="relative z-10">
-          {visitor.photo ? (
-            <img src={visitor.photo} alt="Visitor" className="w-24 h-24 rounded-full mx-auto mb-6 object-cover shadow-xl ring-4 ring-emerald-400 bg-white" />
-          ) : (
-            <div className="bg-white text-emerald-600 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl ring-4 ring-emerald-400">
-              <CheckCircle size={48} />
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="relative mb-6">
+            {visitor.photo ? (
+              <img src={visitor.photo} alt="Visitor" className="w-24 h-24 rounded-full object-cover shadow-xl ring-4 ring-emerald-400 bg-white" />
+            ) : (
+              <div className="bg-white text-emerald-600 w-24 h-24 rounded-full flex items-center justify-center shadow-xl ring-4 ring-emerald-400">
+                <img src="/logo.png" alt="SecurePass Logo" className="w-16 h-16 rounded-xl" />
+              </div>
+            )}
+            <div className="absolute -bottom-2 -right-2 bg-white p-1.5 rounded-lg shadow-md border">
+              <img src="/logo.png" alt="Logo Icon" className="w-5 h-5 rounded-sm" />
             </div>
-          )}
+          </div>
           <h2 className="text-3xl font-extrabold tracking-tight">Visitor Badge</h2>
           <p className="text-emerald-50 mt-2 font-medium">Successfully Checked In</p>
         </div>
@@ -59,21 +64,29 @@ const DigitalBadge = ({ visitor, onBack }) => {
             ))}
           </div>
 
-          <div className="flex items-center justify-between p-4 rounded-2xl shadow-sm border"
-            style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
-          >
-            <div className="flex items-center space-x-3">
-              <div className="p-2 rounded-lg text-emerald-500" style={{ background: 'rgba(16,185,129,0.1)' }}>
-                <Calendar size={20} />
+            <div className="flex items-center justify-between p-4 rounded-2xl shadow-sm border"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2 rounded-lg text-emerald-500" style={{ background: 'rgba(16,185,129,0.1)' }}>
+                  <Calendar size={20} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Arrival Time</p>
+                  <p className="font-bold" style={{ color: 'var(--text-primary)' }}>
+                    {format(visitor.checkInTime, 'MMM d, h:mm a')}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Arrival Time</p>
-                <p className="font-bold" style={{ color: 'var(--text-primary)' }}>
-                  {format(visitor.checkInTime, 'MMM d, h:mm a')}
-                </p>
-              </div>
+              {visitor.expiryTime && (
+                <div className="text-right border-l pl-4" style={{ borderColor: 'var(--border-color)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Expires</p>
+                  <p className="font-bold text-rose-500">
+                    {format(visitor.expiryTime, 'h:mm a')}
+                  </p>
+                </div>
+              )}
             </div>
-          </div>
         </div>
 
         <div className="pt-4 flex gap-3">

@@ -20,9 +20,7 @@ const Navigation = () => {
     >
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-100/50">
-            <UserPlus size={20} />
-          </div>
+          <img src="/logo.png" alt="SecurePass Logo" className="w-10 h-10 rounded-xl shadow-lg" />
           <span className="font-black tracking-tight text-lg" style={{ color: 'var(--text-primary)' }}>
             SecurePass
           </span>

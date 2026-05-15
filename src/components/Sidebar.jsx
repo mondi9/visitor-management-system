@@ -4,7 +4,6 @@ import {
   Users,
   Settings,
   LogOut,
-  Shield,
   Bell,
   X,
   ChevronRight,
@@ -45,8 +44,8 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           {/* Logo Section */}
           <div className="p-6 flex items-center justify-between">
             <div className={`flex items-center space-x-3 transition-opacity duration-300 ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
-              <div className="bg-indigo-600 p-2 rounded-xl shadow-lg shadow-indigo-200/30">
-                <Shield className="text-white" size={20} />
+              <div className="flex items-center justify-center">
+                <img src="/logo.png" alt="SecurePass Logo" className="w-10 h-10 object-contain" />
               </div>
               <span className="font-bold text-lg whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>
                 SecurePass
