@@ -41,18 +41,20 @@ const Navigation = () => {
               <UserPlus size={16} />
               <span>Check-In</span>
             </Link>
-            <Link
-              to="/admin"
-              className="flex items-center space-x-2 px-4 py-2 rounded-xl transition-all text-sm font-bold"
-              style={{
-                background: isAdmin ? 'var(--bg-card)' : 'transparent',
-                color: isAdmin ? 'var(--accent-text)' : 'var(--text-muted)',
-                boxShadow: isAdmin ? '0 1px 4px var(--shadow-color)' : 'none',
-              }}
-            >
-              <Users size={16} />
-              <span>Admin</span>
-            </Link>
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className="flex items-center space-x-2 px-4 py-2 rounded-xl transition-all text-sm font-bold"
+                style={{
+                  background: isAdmin ? 'var(--bg-card)' : 'transparent',
+                  color: isAdmin ? 'var(--accent-text)' : 'var(--text-muted)',
+                  boxShadow: isAdmin ? '0 1px 4px var(--shadow-color)' : 'none',
+                }}
+              >
+                <Users size={16} />
+                <span>Admin</span>
+              </Link>
+            )}
           </div>
 
           {/* Dark Mode Toggle */}
