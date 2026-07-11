@@ -4,10 +4,16 @@ import {
   Users,
   Settings,
   LogOut,
-  Bell,
   X,
   ChevronRight,
-  UserPlus
+  ClipboardCheck,
+  UserCheck,
+  Package,
+  FileText,
+  UserCog,
+  Shield,
+  HardHat,
+  Star
 } from 'lucide-react';
 
 const Sidebar = ({ isOpen, setIsOpen }) => {
@@ -15,48 +21,59 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
 
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/admin' },
-    { name: 'Visitor List', icon: Users, path: '/admin/visitors' },
-    { name: 'New Registration', icon: UserPlus, path: '/' },
-    { name: 'Notifications', icon: Bell, path: '/admin/notifications' },
+    { name: 'Visitors', icon: Users, path: '/admin/visitors' },
+    { name: 'Frequent Visitors', icon: Star, path: '/admin/frequent-visitors' },
+    { name: 'Pre-Registrations', icon: ClipboardCheck, path: '/admin/pre-registrations' },
+    { name: 'Hosts', icon: UserCheck, path: '/admin/hosts' },
+    { name: 'Contractors', icon: HardHat, path: '/admin/contractors' },
+    { name: 'Deliveries', icon: Package, path: '/admin/deliveries' },
+    { name: 'Reports', icon: FileText, path: '/admin/reports' },
     { name: 'Settings', icon: Settings, path: '/admin/settings' },
+    { name: 'User Management', icon: UserCog, path: '/admin/users' },
   ];
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => {
+    if (path === '/admin') {
+      return location.pathname === '/admin' || location.pathname === '/admin/';
+    }
+    return location.pathname.startsWith(path);
+  };
 
   return (
     <>
       {/* Mobile Backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 backdrop-blur-sm z-40 lg:hidden transition-all duration-300"
-          style={{ background: 'rgba(15,17,23,0.5)' }}
+          className="fixed inset-0 bg-[#0B192C]/50 backdrop-blur-sm z-40 lg:hidden transition-all duration-300"
           onClick={() => setIsOpen(false)}
         />
       )}
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 left-0 h-full border-r z-50 transition-all duration-300 ease-in-out ${isOpen ? 'w-72' : 'w-0 lg:w-24 overflow-hidden'} lg:relative lg:translate-x-0`}
-        style={{ background: 'var(--sidebar-bg)', borderColor: 'var(--border-color)' }}
+        className={`fixed top-0 left-0 h-full border-r border-[#1e293b] z-50 transition-all duration-300 ease-in-out ${isOpen ? 'w-64' : 'w-0 lg:w-20 overflow-hidden'} lg:relative lg:translate-x-0`}
+        style={{ background: 'var(--sidebar-bg)' }}
       >
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full text-white">
 
           {/* Logo Section */}
-          <div className="p-6 flex items-center justify-between">
+          <div className="p-6 flex items-center justify-between border-b border-[#1e293b]/50">
             <div className={`flex items-center space-x-3 transition-opacity duration-300 ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
-              <div className="flex items-center justify-center">
-                <img src="/logo.png" alt="SecurePass Logo" className="w-10 h-10 object-contain" />
+              <div className="flex items-center justify-center text-white">
+                <Shield size={28} />
               </div>
-              <span className="font-bold text-lg whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>
-                SecurePass
-              </span>
+              <div className="flex flex-col">
+                <span className="font-bold text-xl leading-none tracking-wide text-white">
+                  VMS
+                </span>
+                <span className="text-[9px] text-slate-400 whitespace-nowrap mt-1">Visitor Management System</span>
+              </div>
             </div>
 
             {/* Collapse Toggle (Desktop) */}
             <button
               onClick={() => setIsOpen(!isOpen)}
-              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg transition-all"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-muted)' }}
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:bg-slate-800 text-slate-400 hover:text-white ml-auto"
             >
               <ChevronRight className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} size={18} />
             </button>
@@ -64,56 +81,51 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
             {/* Close Button (Mobile) */}
             <button
               onClick={() => setIsOpen(false)}
-              className="lg:hidden"
-              style={{ color: 'var(--text-muted)' }}
+              className="lg:hidden text-slate-400 hover:text-white"
             >
               <X size={24} />
             </button>
           </div>
 
           {/* Navigation Links */}
-          <nav className="flex-1 px-4 space-y-2 py-4">
+          <nav className="flex-1 px-3 py-6 space-y-1.5 overflow-y-auto custom-scrollbar">
             {menuItems.map((item) => (
               <Link
                 key={item.name}
                 to={item.path}
-                className="flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-200 group"
+                className="flex items-center space-x-3 px-3 py-3 rounded-lg transition-all duration-200 group"
                 style={{
-                  background: isActive(item.path) ? 'var(--accent-light)' : 'transparent',
-                  color: isActive(item.path) ? 'var(--accent-text)' : 'var(--text-secondary)',
+                  background: isActive(item.path) ? 'var(--primary-blue)' : 'transparent',
+                  color: isActive(item.path) ? '#ffffff' : '#94a3b8',
                 }}
               >
-                <item.icon size={22} />
-                <span className={`font-bold transition-all duration-300 whitespace-nowrap ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
+                <div className="flex items-center justify-center min-w-[24px]">
+                  <item.icon size={20} className={isActive(item.path) ? 'text-white' : 'text-slate-400 group-hover:text-white transition-colors'} />
+                </div>
+                <span className={`font-medium text-sm transition-all duration-300 whitespace-nowrap group-hover:text-white ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
                   {item.name}
                 </span>
-                {isActive(item.path) && isOpen && (
-                  <div className="ml-auto w-1.5 h-1.5 bg-indigo-500 rounded-full"></div>
-                )}
               </Link>
             ))}
           </nav>
 
           {/* Bottom Actions */}
-          <div className="p-4 mt-auto">
-            <div
-              className={`mb-4 p-4 rounded-2xl transition-all duration-300 ${!isOpen && 'lg:opacity-0 lg:hidden'}`}
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border-color)' }}
-            >
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold">
-                  AD
-                </div>
-                <div>
-                  <p className="text-sm font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>Admin User</p>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Security Head</p>
-                </div>
+          <div className="p-4 border-t border-[#1e293b]/50">
+            <div className={`mb-2 flex items-center space-x-3 p-2 transition-all duration-300 ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
+              <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 border border-slate-700">
+                <img src="https://i.pravatar.cc/150?u=admin" alt="Admin" className="w-full h-full rounded-full object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white truncate">Admin User</p>
+                <p className="text-xs text-slate-400 truncate">Security Team</p>
               </div>
             </div>
 
-            <button className="flex items-center space-x-3 w-full px-4 py-3 rounded-2xl text-rose-500 hover:bg-rose-500/10 transition-all group">
-              <LogOut size={22} className="group-hover:-translate-x-1 transition-transform" />
-              <span className={`font-bold transition-all duration-300 ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
+            <button className="flex items-center space-x-3 w-full px-3 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all group">
+              <div className="flex items-center justify-center min-w-[24px]">
+                <LogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
+              </div>
+              <span className={`font-medium text-sm transition-all duration-300 ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
                 Sign Out
               </span>
             </button>

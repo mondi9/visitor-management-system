@@ -1,21 +1,15 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { Search, UserCheck, UserX, Clock, Filter, LayoutDashboard, LogOut, Loader2, Calendar, Menu, Shield, Users, Timer, Plus, AlertTriangle, X } from 'lucide-react';
+import { Search, UserCheck, UserX, Clock, LogOut, Loader2, Calendar, Menu, Users, Timer, Plus, AlertTriangle, Bell, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
 import { format, differenceInMinutes, addMinutes } from 'date-fns';
 import Sidebar from './Sidebar';
 
 const AdminDashboard = () => {
   const [visitors, setVisitors] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterDate, setFilterDate] = useState('');
-  const [error, setError] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [notifications, setNotifications] = useState([]);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [role, setRole] = useState('Security'); // Roles: Security, Tenant, Owner
-  const [currentUserEmail, setCurrentUserEmail] = useState('host@company.com'); // Simulated logged in user
 
   useEffect(() => {
     const q = query(collection(db, 'visitors'), orderBy('checkInTime', 'desc'));
@@ -27,7 +21,6 @@ const AdminDashboard = () => {
         const expiryTime = data.expiryTime?.toDate();
         const checkOutTime = data.checkOutTime?.toDate();
 
-        // Calculate status in real-time if Active
         let status = data.status;
         if (status === 'Active' && expiryTime && new Date() > expiryTime) {
           status = 'Overstayed';
@@ -46,11 +39,9 @@ const AdminDashboard = () => {
       setLoading(false);
     }, (err) => {
       console.error("Firestore error:", err);
-      setError('Please check your Firebase configuration and Firestore rules.');
       setLoading(false);
     });
 
-    // Update current time every minute for UI
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
 
     return () => {
@@ -59,376 +50,245 @@ const AdminDashboard = () => {
     };
   }, []);
 
-  // In-app Notification Logic for Tenants
-  useEffect(() => {
-    if (role !== 'Tenant') return;
-    
-    const nearExpiryVisitors = visitors.filter(v => 
-      v.status === 'Active' && 
-      v.hostEmail === currentUserEmail && 
-      getTimeRemaining(v.expiryTime) > 0 && 
-      getTimeRemaining(v.expiryTime) <= 15
-    );
-
-    if (nearExpiryVisitors.length > 0) {
-      const newNotifs = nearExpiryVisitors.map(v => ({
-        id: `expiry-${v.id}`,
-        message: `Your visitor ${v.name} is nearing their time limit.`,
-        visitorId: v.id,
-        expiryTime: v.expiryTime
-      }));
-      
-      // Only add if not already in notifications
-      setNotifications(prev => {
-        const existingIds = prev.map(n => n.id);
-        const filteredNew = newNotifs.filter(n => !existingIds.includes(n.id));
-        return [...prev, ...filteredNew];
-      });
-    }
-  }, [visitors, role, currentUserEmail]);
-
-  const handleCheckOut = async (visitorId) => {
-    try {
-      const visitorRef = doc(db, 'visitors', visitorId);
-      await updateDoc(visitorRef, {
-        status: 'Checked Out',
-        checkOutTime: serverTimestamp()
-      });
-    } catch (err) {
-      console.error("Error checking out:", err);
-    }
-  };
-
-  const handleExtend = async (visitorId, currentExpiry) => {
-    try {
-      const newExpiry = addMinutes(currentExpiry || new Date(), 30);
-      const visitorRef = doc(db, 'visitors', visitorId);
-      await updateDoc(visitorRef, {
-        expiryTime: newExpiry,
-        status: 'Active' // Reset status to active if they were overstayed
-      });
-      // In a real app, you'd trigger an email here too
-    } catch (err) {
-      console.error("Error extending stay:", err);
-    }
-  };
-
-  const getTimeRemaining = (expiryTime) => {
-    if (!expiryTime) return null;
-    const diff = differenceInMinutes(expiryTime, currentTime);
-    return diff;
-  };
-
-  const filteredVisitors = visitors.filter(visitor => {
-    const matchesName = visitor.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDate = !filterDate || (visitor.checkInTime && format(visitor.checkInTime, 'yyyy-MM-dd') === filterDate);
-    const matchesRole = role === 'Security' || role === 'Owner' || (role === 'Tenant' && visitor.hostEmail === currentUserEmail);
-    return matchesName && matchesDate && matchesRole;
-  });
-
-  const inputStyle = {
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border-color)',
-    color: 'var(--text-primary)',
-  };
+  const totalVisitors = visitors.length;
+  const activeNow = visitors.filter(v => v.status === 'Active').length;
+  const checkedInToday = visitors.filter(v => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')).length;
+  const checkedOutToday = visitors.filter(v => v.status === 'Checked Out' && v.checkOutTime && format(v.checkOutTime, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')).length;
 
   return (
-    <div className="flex min-h-screen font-sans pt-16" style={{ background: 'var(--bg-primary)' }}>
+    <div className="flex h-screen bg-[#f4f7f6] overflow-hidden">
       <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
 
-      {/* Notification Toast Area */}
-      <div className="fixed top-20 right-6 z-[60] flex flex-col gap-3 w-80">
-        {notifications.map((notif, idx) => (
-          <div key={idx} className="p-4 rounded-2xl border shadow-xl animate-in slide-in-from-right-8 duration-300"
-            style={{ background: 'var(--bg-card)', borderColor: 'var(--accent)', borderLeftWidth: '4px' }}
-          >
-            <div className="flex justify-between items-start mb-2">
-              <div className="flex items-center space-x-2 text-rose-500 font-bold text-xs uppercase tracking-wider">
-                <AlertTriangle size={14} />
-                <span>Near Expiry</span>
-              </div>
-              <button onClick={() => setNotifications(prev => prev.filter(n => n.id !== notif.id))} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
-            </div>
-            <p className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>{notif.message}</p>
-            <button 
-              onClick={() => {
-                handleExtend(notif.visitorId, notif.expiryTime);
-                setNotifications(prev => prev.filter(n => n.id !== notif.id));
-              }}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all"
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Top Navigation */}
+        <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+          <div className="flex items-center">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="mr-4 lg:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
             >
-              Extend Stay 30m
+              <Menu size={24} />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-[#0B192C]">Dashboard</h1>
+              <p className="text-sm text-slate-500">Welcome back, Admin</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center space-x-4">
+            <div className="hidden md:flex items-center space-x-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600">
+              <Calendar size={16} />
+              <span>{format(new Date(), 'dd MMM yyyy')}</span>
+            </div>
+            <button className="p-2 border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 relative">
+              <Bell size={20} />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>
             </button>
           </div>
-        ))}
-      </div>
-
-        {/* Mobile Header */}
-        <header className="lg:hidden flex items-center justify-between p-4 border-b"
-          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
-        >
-          <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="SecurePass Logo" className="w-8 h-8 rounded-lg shadow-sm" />
-            <span className="font-bold" style={{ color: 'var(--text-primary)' }}>SecurePass Admin</span>
-          </div>
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="p-2 rounded-xl transition-colors"
-            style={{ color: 'var(--text-muted)', background: 'var(--bg-subtle)' }}
-          >
-            <Menu size={24} />
-          </button>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 animate-in fade-in duration-700">
-          <div className="max-w-7xl mx-auto space-y-8">
-
-            {/* Header (Desktop) */}
-            <div className="hidden lg:flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-3xl border"
-              style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
-            >
-              <div className="flex items-center space-x-4">
-                <img src="/logo.png" alt="SecurePass Logo" className="w-16 h-16 rounded-2xl shadow-lg border-2 border-white/10" />
-                <div>
-                  <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Visitor Overview</h1>
-                  <p className="font-medium text-sm" style={{ color: 'var(--text-muted)' }}>Real-time tracking & management</p>
+        {/* Dashboard Content */}
+        <main className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+          
+          {/* Top Stat Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500 mb-1">Total Visitors</p>
+                <div className="flex items-baseline space-x-3">
+                  <h2 className="text-3xl font-bold text-slate-800">{totalVisitors}</h2>
+                  <span className="flex items-center text-xs font-semibold text-emerald-500"><ArrowUpRight size={14} className="mr-0.5"/> 12%</span>
                 </div>
+                <p className="text-xs text-slate-400 mt-1">vs yesterday</p>
               </div>
-
-              <div className="flex flex-wrap gap-3">
-                {/* Role Switcher */}
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="px-4 py-2 rounded-xl border font-bold text-sm bg-transparent outline-none"
-                  style={{ color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}
-                >
-                  <option value="Security">Security View</option>
-                  <option value="Tenant">Tenant View</option>
-                  <option value="Owner">Owner View</option>
-                </select>
-
-                <div className="px-4 py-2 rounded-xl border font-bold flex items-center space-x-2 text-emerald-500"
-                  style={{ background: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.2)' }}
-                >
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                  <span>{visitors.filter(v => v.status === 'Active').length} Active</span>
-                </div>
-
-                <div className="px-4 py-2 rounded-xl border font-bold flex items-center space-x-2 text-rose-500"
-                  style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)' }}
-                >
-                  <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse"></div>
-                  <span>{visitors.filter(v => v.status === 'Overstayed').length} Overstayed</span>
-                </div>
+              <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                <Users size={24} />
               </div>
             </div>
 
-            {error && (
-              <div className="p-6 rounded-2xl border flex items-center space-x-3 text-rose-500"
-                style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)' }}
-              >
-                <UserX size={24} />
-                <p className="font-medium">{error}</p>
-              </div>
-            )}
-
-            {/* Stats Summary */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { label: 'Total Visitors', value: visitors.length, icon: <Users size={20} />, color: '#6366f1', bg: 'rgba(99,102,241,0.1)' },
-                { label: 'Active Now', value: visitors.filter(v => v.status === 'Active').length, icon: <UserCheck size={20} />, color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
-                {
-                  label: "Today's Check-ins",
-                  value: visitors.filter(v => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')).length,
-                  icon: <Clock size={20} />, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)'
-                },
-                { label: 'Checked Out', value: visitors.filter(v => v.status === 'Checked Out').length, icon: <LogOut size={20} />, color: '#94a3b8', bg: 'rgba(148,163,184,0.1)' },
-              ].map((stat, i) => (
-                <div key={i} className="p-6 rounded-3xl border transition-all hover:scale-[1.02]"
-                  style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
-                >
-                  <p className="text-[10px] font-black uppercase tracking-widest mb-2" style={{ color: 'var(--text-muted)' }}>
-                    {stat.label}
-                  </p>
-                  <div className="flex items-end justify-between">
-                    <h3 className="text-3xl font-black" style={{ color: stat.color }}>{stat.value}</h3>
-                    <div className="p-2 rounded-xl" style={{ background: stat.bg, color: stat.color }}>{stat.icon}</div>
-                  </div>
+            <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500 mb-1">Currently On-Site</p>
+                <div className="flex items-baseline space-x-3">
+                  <h2 className="text-3xl font-bold text-slate-800">{activeNow}</h2>
+                  <span className="flex items-center text-xs font-semibold text-emerald-500"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span> Live</span>
                 </div>
-              ))}
+                <p className="text-xs text-slate-400 mt-1">across all facilities</p>
+              </div>
+              <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
+                <UserCheck size={24} />
+              </div>
             </div>
 
-            {/* Filters */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="md:col-span-2 relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2" size={20} style={{ color: 'var(--text-muted)' }} />
-                <input
-                  type="text"
-                  placeholder="Search by visitor name..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 rounded-2xl outline-none font-medium transition-all"
-                  style={{ ...inputStyle, boxShadow: '0 1px 4px var(--shadow-color)' }}
-                />
+            <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500 mb-1">Checked In Today</p>
+                <div className="flex items-baseline space-x-3">
+                  <h2 className="text-3xl font-bold text-slate-800">{checkedInToday}</h2>
+                  <span className="flex items-center text-xs font-semibold text-emerald-500"><ArrowUpRight size={14} className="mr-0.5"/> 8%</span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">vs yesterday</p>
               </div>
-              <div className="relative">
-                <Calendar className="absolute left-4 top-1/2 -translate-y-1/2" size={20} style={{ color: 'var(--text-muted)' }} />
-                <input
-                  type="date"
-                  value={filterDate}
-                  onChange={(e) => setFilterDate(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 rounded-2xl outline-none font-medium transition-all"
-                  style={{ ...inputStyle, boxShadow: '0 1px 4px var(--shadow-color)' }}
-                />
+              <div className="w-12 h-12 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">
+                <Activity size={24} />
               </div>
-              <button
-                onClick={() => { setSearchTerm(''); setFilterDate(''); }}
-                className="py-4 rounded-2xl font-bold border-2 border-dashed transition-all flex items-center justify-center space-x-2"
-                style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}
-              >
-                <Filter size={18} />
-                <span>Reset Filters</span>
-              </button>
             </div>
 
-            {/* Table */}
-            <div className="rounded-3xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-              {loading ? (
-                <div className="p-20 flex flex-col items-center justify-center space-y-4">
-                  <Loader2 className="animate-spin text-indigo-500" size={48} />
-                  <p className="font-medium text-lg" style={{ color: 'var(--text-muted)' }}>Synchronizing secure data...</p>
+            <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500 mb-1">Checked Out Today</p>
+                <div className="flex items-baseline space-x-3">
+                  <h2 className="text-3xl font-bold text-slate-800">{checkedOutToday}</h2>
+                  <span className="flex items-center text-xs font-semibold text-rose-500"><ArrowDownRight size={14} className="mr-0.5"/> 5%</span>
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border-color)' }}>
-                        {['Visitor Info', 'Visit Details', 'Stay Info', 'Time Remaining', 'Status', 'Actions'].map(h => (
-                          <th key={h} className="px-6 py-5 text-[10px] font-black uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredVisitors.map((visitor) => (
-                        <tr key={visitor.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                          <td className="px-6 py-5">
-                            <div className="flex items-center space-x-3">
-                              {visitor.photo ? (
-                                <img src={visitor.photo} alt={visitor.name} className="w-11 h-11 object-cover rounded-2xl border" style={{ borderColor: 'var(--border-color)' }} />
-                              ) : (
-                                <div className="w-11 h-11 bg-indigo-500/20 rounded-2xl flex items-center justify-center text-indigo-400 font-black text-lg">
-                                  {visitor.name.charAt(0)}
-                                </div>
-                              )}
-                              <div>
-                                <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{visitor.name}</p>
-                                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{visitor.phone}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-5">
-                            <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{visitor.purpose}</p>
-                            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Host: <span className="text-indigo-400 font-bold">{visitor.hostName}</span></p>
-                          </td>
-                          <td className="px-6 py-5">
-                            <div className="flex flex-col space-y-1">
-                              <div className="flex items-center space-x-2 text-sm font-bold" style={{ color: 'var(--text-secondary)' }}>
-                                <Clock size={14} className="text-indigo-400" />
-                                <span>{visitor.checkInTime ? format(visitor.checkInTime, 'HH:mm') : '--:--'}</span>
-                                <span style={{ color: 'var(--text-muted)' }}>→</span>
-                                <span>{visitor.expiryTime ? format(visitor.expiryTime, 'HH:mm') : '--:--'}</span>
-                              </div>
-                              {visitor.checkOutTime && (
-                                <p className="text-[10px] font-bold text-slate-400">Out: {format(visitor.checkOutTime, 'HH:mm')}</p>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-5">
-                            {visitor.status !== 'Checked Out' ? (
-                              <div className="flex items-center space-x-2">
-                                <Timer size={14} className={getTimeRemaining(visitor.expiryTime) < 15 ? 'text-rose-500 animate-pulse' : 'text-emerald-500'} />
-                                <span className={`font-black text-sm ${getTimeRemaining(visitor.expiryTime) < 15 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                                  {getTimeRemaining(visitor.expiryTime) > 0
-                                    ? `${getTimeRemaining(visitor.expiryTime)}m`
-                                    : visitor.status === 'Overstayed' ? 'Overdue' : '--'}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-xs font-bold text-slate-400">N/A</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-5">
-                            <span className={`inline-flex items-center px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider space-x-2`}
-                              style={{
-                                background: visitor.status === 'Active' ? 'rgba(16,185,129,0.15)' :
-                                  visitor.status === 'Overstayed' ? 'rgba(239,68,68,0.15)' : 'var(--bg-subtle)',
-                                color: visitor.status === 'Active' ? '#10b981' :
-                                  visitor.status === 'Overstayed' ? '#ef4444' : 'var(--text-muted)',
-                                border: `1px solid ${visitor.status === 'Active' ? 'rgba(16,185,129,0.3)' :
-                                  visitor.status === 'Overstayed' ? 'rgba(239,68,68,0.3)' : 'var(--border-color)'}`,
-                              }}
-                            >
-                              {visitor.status === 'Overstayed' && <AlertTriangle size={12} />}
-                              <span>{visitor.status}</span>
-                            </span>
-                          </td>
-                          <td className="px-6 py-5">
-                            <div className="flex items-center space-x-2">
-                              {visitor.status !== 'Checked Out' && (
-                                <>
-                                  <button
-                                    onClick={() => handleCheckOut(visitor.id)}
-                                    className="p-2.5 rounded-xl transition-all text-rose-500 hover:bg-rose-500/10 border"
-                                    style={{ borderColor: 'rgba(239,68,68,0.2)' }}
-                                    title="Check-out"
-                                  >
-                                    <LogOut size={16} />
-                                  </button>
-                                  {(role === 'Tenant' || role === 'Owner') && (
-                                    <button
-                                      onClick={() => handleExtend(visitor.id, visitor.expiryTime)}
-                                      className="p-2.5 rounded-xl transition-all text-indigo-500 hover:bg-indigo-500/10 border"
-                                      style={{ borderColor: 'rgba(99,102,241,0.2)' }}
-                                      title="Extend 30m"
-                                    >
-                                      <Plus size={16} />
-                                    </button>
-                                  )}
-                                </>
-                              )}
-                              {visitor.status === 'Checked Out' && (
-                                <span className="text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-xl font-bold border"
-                                  style={{ color: 'var(--text-muted)', background: 'var(--bg-subtle)', borderColor: 'var(--border-color)' }}
-                                >
-                                  Done
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredVisitors.length === 0 && (
-                        <tr>
-                          <td colSpan="5" className="px-6 py-24 text-center">
-                            <div className="flex flex-col items-center justify-center space-y-3">
-                              <div className="p-4 rounded-full" style={{ background: 'var(--bg-subtle)', color: 'var(--text-muted)' }}>
-                                <Search size={48} />
-                              </div>
-                              <p className="font-bold text-lg" style={{ color: 'var(--text-secondary)' }}>No matches found</p>
-                              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Try adjusting your filters or search term</p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                <p className="text-xs text-slate-400 mt-1">vs yesterday</p>
+              </div>
+              <div className="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center text-orange-500">
+                <LogOut size={24} />
+              </div>
             </div>
           </div>
+
+          {/* Middle Row Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm lg:col-span-1">
+              <h3 className="font-bold text-slate-800 mb-4">Visitor Trend (This Week)</h3>
+              <div className="h-48 w-full border-b border-l border-slate-200 relative flex items-end">
+                <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <polyline fill="none" stroke="#2563eb" strokeWidth="2" points="0,80 20,40 40,60 60,20 80,50 100,10" />
+                  <circle cx="20" cy="40" r="2" fill="#2563eb" />
+                  <circle cx="40" cy="60" r="2" fill="#2563eb" />
+                  <circle cx="60" cy="20" r="2" fill="#2563eb" />
+                  <circle cx="80" cy="50" r="2" fill="#2563eb" />
+                </svg>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+              <h3 className="font-bold text-slate-800 mb-4">Visitors by Purpose</h3>
+              <div className="flex flex-col items-center justify-center h-48">
+                <div className="w-32 h-32 rounded-full border-[16px] border-[#2563eb] border-t-emerald-400 border-l-purple-400 relative flex items-center justify-center mb-4">
+                  <div className="text-center">
+                    <span className="block text-2xl font-bold text-slate-800">{totalVisitors}</span>
+                    <span className="text-[10px] text-slate-400 uppercase">Total</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+              <h3 className="font-bold text-slate-800 mb-4">Top Visiting Hosts</h3>
+              <div className="space-y-4">
+                {[
+                  { name: 'Adewale Okafor', visits: 18, init: 'AO', bg: 'bg-blue-100 text-blue-600' },
+                  { name: 'Funmi Adebayo', visits: 15, init: 'FA', bg: 'bg-purple-100 text-purple-600' },
+                  { name: 'Michael Johnson', visits: 12, init: 'MJ', bg: 'bg-emerald-100 text-emerald-600' },
+                  { name: 'Bola Ahmed', visits: 10, init: 'BA', bg: 'bg-orange-100 text-orange-600' }
+                ].map((host, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${host.bg}`}>
+                        {host.init}
+                      </div>
+                      <span className="text-sm font-medium text-slate-700">{host.name}</span>
+                    </div>
+                    <span className="font-bold text-slate-800">{host.visits}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="bg-white rounded-xl border border-slate-100 shadow-sm lg:col-span-2 overflow-hidden flex flex-col">
+              <div className="p-6 border-b border-slate-100">
+                <h3 className="font-bold text-slate-800">Recent Visitors</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50/50">
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Name</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Visiting</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Check-In</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {visitors.slice(0, 5).map((visitor) => (
+                      <tr key={visitor.id} className="hover:bg-slate-50/50">
+                        <td className="px-6 py-3">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 overflow-hidden border border-slate-200 flex items-center justify-center text-slate-400 text-xs font-bold">
+                              {visitor.photo ? <img src={visitor.photo} alt="" className="w-full h-full object-cover"/> : visitor.name.charAt(0)}
+                            </div>
+                            <span className="text-sm font-semibold text-slate-700">{visitor.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-3">
+                          <span className="text-sm text-slate-600">{visitor.hostName || '-'}</span>
+                        </td>
+                        <td className="px-6 py-3">
+                          <span className="text-sm text-slate-600">{visitor.checkInTime ? format(visitor.checkInTime, 'hh:mm a') : '-'}</span>
+                        </td>
+                        <td className="px-6 py-3">
+                          <span className={`inline-flex px-2 py-1 rounded text-[10px] font-bold uppercase ${
+                            visitor.status === 'Active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {visitor.status === 'Active' ? 'On-site' : 'Checked Out'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                    {visitors.length === 0 && (
+                      <tr><td colSpan={4} className="p-8 text-center text-slate-400 text-sm">No visitors found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-100 shadow-sm flex flex-col">
+              <div className="p-6 border-b border-slate-100">
+                <h3 className="font-bold text-slate-800">Site Summary</h3>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <UserCheck size={18} className="text-slate-400" />
+                    <span className="text-sm text-slate-600">Employees on-site</span>
+                  </div>
+                  <span className="font-bold text-slate-800">256</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <Users size={18} className="text-slate-400" />
+                    <span className="text-sm text-slate-600">Contractors on-site</span>
+                  </div>
+                  <span className="font-bold text-slate-800">18</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <Calendar size={18} className="text-slate-400" />
+                    <span className="text-sm text-slate-600">Expected Visitors</span>
+                  </div>
+                  <span className="font-bold text-slate-800">22</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <LogOut size={18} className="text-slate-400" />
+                    <span className="text-sm text-slate-600">Deliveries Today</span>
+                  </div>
+                  <span className="font-bold text-slate-800">9</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
         </main>
       </div>
+    </div>
   );
 };
 

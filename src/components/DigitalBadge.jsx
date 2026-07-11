@@ -1,8 +1,51 @@
-import { CheckCircle, Calendar, User, Briefcase, ArrowLeft } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle, Calendar, User, Briefcase, ArrowLeft, Star, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { db } from '../firebase';
+import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 
 const DigitalBadge = ({ visitor, onBack }) => {
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   if (!visitor) return null;
+
+  const handleSaveAsFrequent = async () => {
+    if (saved || saving) return;
+    setSaving(true);
+    try {
+      // Check if already registered by phone
+      const existing = await getDocs(
+        query(collection(db, 'frequentVisitors'), where('phone', '==', visitor.phone))
+      );
+      if (!existing.empty) {
+        setSaved(true);
+        setSaving(false);
+        return;
+      }
+      await addDoc(collection(db, 'frequentVisitors'), {
+        name: visitor.name || '',
+        nameLower: (visitor.name || '').toLowerCase(),
+        company: visitor.company || '',
+        phone: visitor.phone || '',
+        email: visitor.email || '',
+        idType: visitor.idType || '',
+        idNumber: visitor.idNumber || '',
+        photoUrl: visitor.photoUrl || null,
+        defaultHostName: visitor.hostName || '',
+        defaultHostEmail: visitor.hostEmail || '',
+        defaultPurpose: visitor.purpose || 'Business Meeting',
+        visitCount: 1,
+        lastVisit: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+      setSaved(true);
+    } catch (err) {
+      console.error('Failed to save frequent visitor:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="max-w-md mx-auto rounded-3xl shadow-2xl overflow-hidden border animate-in slide-in-from-bottom-8 duration-500"
@@ -89,22 +132,42 @@ const DigitalBadge = ({ visitor, onBack }) => {
             </div>
         </div>
 
-        <div className="pt-4 flex gap-3">
+        <div className="pt-4 flex flex-col gap-3">
+          {/* Save as Frequent Visitor */}
           <button
-            onClick={() => window.print()}
-            className="flex-1 py-4 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 shadow-lg shadow-indigo-200/30"
+            onClick={handleSaveAsFrequent}
+            disabled={saving || saved}
+            className={`w-full py-3 px-6 font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 border-2 ${
+              saved
+                ? 'border-amber-300 bg-amber-50 text-amber-600 cursor-default'
+                : 'border-amber-400 bg-amber-400/10 hover:bg-amber-400/20 text-amber-600'
+            } disabled:opacity-70`}
           >
-            <CheckCircle size={18} />
-            <span>Print Badge</span>
+            {saving ? (
+              <Loader2 size={17} className="animate-spin" />
+            ) : (
+              <Star size={17} className={saved ? 'fill-amber-500 text-amber-500' : ''} />
+            )}
+            <span>{saved ? 'Saved as Frequent Visitor ✓' : 'Save as Frequent Visitor'}</span>
           </button>
-          <button
-            onClick={onBack}
-            className="flex-1 py-4 px-6 font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 border"
-            style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}
-          >
-            <ArrowLeft size={18} />
-            <span>New Check-In</span>
-          </button>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => window.print()}
+              className="flex-1 py-4 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 shadow-lg shadow-indigo-200/30"
+            >
+              <CheckCircle size={18} />
+              <span>Print Badge</span>
+            </button>
+            <button
+              onClick={onBack}
+              className="flex-1 py-4 px-6 font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 border"
+              style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}
+            >
+              <ArrowLeft size={18} />
+              <span>New Check-In</span>
+            </button>
+          </div>
         </div>
       </div>
 

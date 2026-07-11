@@ -2,48 +2,67 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* Light mode tokens */
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+/* Base Tokens - Enterprise Theme */
 :root {
-  --bg-primary: #f8fafc;
+  --bg-primary: #f8fafb;
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
   --bg-subtle: #f1f5f9;
-  --bg-input: #f8fafc;
-  --text-primary: #1e293b;
+  --bg-input: #ffffff;
+  
+  --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-muted: #64748b;
+  
   --border-color: #e2e8f0;
   --border-subtle: #f1f5f9;
-  --shadow-color: rgba(0,0,0,0.06);
-  --nav-bg: rgba(255,255,255,0.85);
-  --sidebar-bg: #ffffff;
-  --accent: #4f46e5;
-  --accent-light: #eef2ff;
-  --accent-text: #4f46e5;
+  
+  --shadow-color: rgba(0, 0, 0, 0.05);
+  
+  --sidebar-bg: #0B192C;
+  --nav-bg: #ffffff;
+  
+  --accent: #0f172a;
+  --accent-light: rgba(15, 23, 42, 0.05);
+  --accent-text: #ffffff;
+
+  --primary-blue: #2563eb;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
 }
 
-/* Dark mode tokens */
+/* Dark mode tokens (if needed, but enterprise defaults to light usually) */
 [data-theme=dark] {
-  --bg-primary: #0f1117;
-  --bg-secondary: #1a1d27;
-  --bg-card: #1e2130;
-  --bg-subtle: #252836;
-  --bg-input: #252836;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --border-color: #2d3044;
-  --border-subtle: #252836;
-  --shadow-color: rgba(0,0,0,0.4);
-  --nav-bg: rgba(26,29,39,0.92);
-  --sidebar-bg: #1a1d27;
-  --accent: #6366f1;
-  --accent-light: rgba(99,102,241,0.15);
-  --accent-text: #818cf8;
+  --bg-primary: #020617;
+  --bg-secondary: #0f172a;
+  --bg-card: #0f172a;
+  --bg-subtle: #1e293b;
+  --bg-input: #1e293b;
+  
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  
+  --border-color: #334155;
+  --border-subtle: #1e293b;
+  
+  --shadow-color: rgba(0, 0, 0, 0.4);
+  
+  --sidebar-bg: #0B192C;
+  --nav-bg: #0f172a;
+  
+  --accent: #3b82f6;
+  --accent-light: rgba(59, 130, 246, 0.15);
+  --accent-text: #ffffff;
 }
 
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
 }
