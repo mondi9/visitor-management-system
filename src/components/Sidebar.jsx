@@ -15,11 +15,14 @@ import {
   HardHat,
   Star
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { ROLE_LABELS, getRoleAccess } from '../lib/roles';
 
 const Sidebar = ({ isOpen, setIsOpen }) => {
   const location = useLocation();
+  const { user, role, signOut } = useAuth();
 
-  const menuItems = [
+  const allMenuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/admin' },
     { name: 'Visitors', icon: Users, path: '/admin/visitors' },
     { name: 'Frequent Visitors', icon: Star, path: '/admin/frequent-visitors' },
@@ -31,6 +34,19 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     { name: 'Settings', icon: Settings, path: '/admin/settings' },
     { name: 'User Management', icon: UserCog, path: '/admin/users' },
   ];
+
+  const menuItems = allMenuItems.filter((item) => {
+    if (!role) return true;
+    return getRoleAccess(item.path).includes(role);
+  });
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
+  };
 
   const isActive = (path) => {
     if (path === '/admin') {
@@ -112,16 +128,19 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           {/* Bottom Actions */}
           <div className="p-4 border-t border-[#1e293b]/50">
             <div className={`mb-2 flex items-center space-x-3 p-2 transition-all duration-300 ${!isOpen && 'lg:opacity-0 lg:hidden'}`}>
-              <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 border border-slate-700">
-                <img src="https://i.pravatar.cc/150?u=admin" alt="Admin" className="w-full h-full rounded-full object-cover" />
+              <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 border border-slate-700 flex-shrink-0">
+                {user?.email?.charAt(0)?.toUpperCase() || 'A'}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">Admin User</p>
-                <p className="text-xs text-slate-400 truncate">Security Team</p>
+                <p className="text-sm font-semibold text-white truncate">{user?.email || 'Admin'}</p>
+                <p className="text-xs text-slate-400 truncate capitalize">{ROLE_LABELS[role] || 'Staff'}</p>
               </div>
             </div>
 
-            <button className="flex items-center space-x-3 w-full px-3 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all group">
+            <button
+              onClick={handleSignOut}
+              className="flex items-center space-x-3 w-full px-3 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all group"
+            >
               <div className="flex items-center justify-center min-w-[24px]">
                 <LogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
               </div>

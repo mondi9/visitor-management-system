@@ -3,6 +3,7 @@ import { db } from '../firebase';
 import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
 import { getVisitStatus, toDate } from '../lib/visitUtils';
 import { sendVisitEmail, sendHostEmail, isEmailConfigured } from '../lib/email';
+import { useAuth } from '../context/AuthContext';
 
 const CHECK_INTERVAL_MS = 30000;
 
@@ -13,8 +14,12 @@ const EXPIRED_MESSAGE_HOST = 'Visitor duration has been exceeded.';
 
 const StayMonitor = () => {
   const running = useRef(false);
+  const { user } = useAuth();
 
   useEffect(() => {
+    // Only staff with a signed-in session may update the reminders; run the
+    // monitor just for them so the kiosk does not trigger permission errors.
+    if (!user) return undefined;
     if (!isEmailConfigured()) {
       console.warn('StayMonitor: EmailJS is not configured — reminders and expiry alerts are disabled.');
     }
@@ -65,7 +70,7 @@ const StayMonitor = () => {
     runCheck();
     const interval = setInterval(runCheck, CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   return null;
 };

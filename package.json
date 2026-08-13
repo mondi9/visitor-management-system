@@ -12,6 +12,7 @@
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
     "@tailwindcss/vite": "^4.2.4",
+    "@vladmandic/face-api": "^1.7.15",
     "date-fns": "^4.1.0",
     "firebase": "^12.12.1",
     "lucide-react": "^1.9.0",

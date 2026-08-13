@@ -1,14 +1,25 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { User, Truck, Camera, Check, ChevronRight, ChevronLeft, Loader2, Star, UserCheck, ClipboardList, Clock, CalendarClock } from 'lucide-react';
+import { User, Truck, Camera, CameraOff, RefreshCw, ScanFace, Check, ChevronRight, ChevronLeft, Loader2, Star, UserCheck, ClipboardList, Clock, CalendarClock } from 'lucide-react';
 import { format } from 'date-fns';
 import FrequentVisitorLookup from './FrequentVisitorLookup';
+import OnboardingGuide from './OnboardingGuide';
 import { DURATION_OPTIONS, DURATION_MINUTES, getExpectedCheckout } from '../lib/visitUtils';
 import { sendVisitEmail } from '../lib/email';
+import { getAppSettings, DEFAULT_DURATION } from '../lib/settings';
 
-const FIREBASE_TIMEOUT_MS = 10000;
+const FIREBASE_TIMEOUT_MS = 15000;
+const FIREBASE_RETRIES = 2;
+
+let faceApiPromise = null;
+const getFaceApi = () => {
+  if (!faceApiPromise) {
+    faceApiPromise = import('@vladmandic/face-api');
+  }
+  return faceApiPromise;
+};
 
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -52,12 +63,39 @@ const CheckInForm = ({ onCheckInSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [emailWarning, setEmailWarning] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    // Seed the default visit duration from admin Settings when not signed-in,
+    // but only before the visitor has chosen anything.
+    getAppSettings().then((settings) => {
+      if (cancelled) return;
+      setFormData((prev) => ({
+        ...prev,
+        duration: settings.defaultVisitDuration || DEFAULT_DURATION,
+      }));
+    });
+    return () => { cancelled = true; };
+  }, []);
   
   // Camera state
   const [photo, setPhoto] = useState(null);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState('idle');
+  const [faceDetected, setFaceDetected] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [faceModelStatus, setFaceModelStatus] = useState('loading');
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const detectCanvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const modelReadyRef = useRef(false);
+  const countdownTimerRef = useRef(null);
+  const detectionTimerRef = useRef(null);
+  const faceDetectBusyRef = useRef(false);
+  const cameraStartRef = useRef(false);
+  const cameraStatusRef = useRef('idle');
+  const countdownValueRef = useRef(0);
+  const photoRef = useRef(null);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -68,46 +106,185 @@ const CheckInForm = ({ onCheckInSuccess }) => {
   };
 
   const startCamera = async () => {
-    setIsCameraOpen(true);
+    if (cameraStartRef.current || streamRef.current) return;
+    cameraStartRef.current = true;
+    setCameraStatus('starting');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
+        audio: false,
+      });
+      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      } else {
+        loadFaceModel();
       }
+      setCameraStatus('live');
+      startDetectionLoop();
     } catch (err) {
       console.error("Error accessing camera:", err);
+      setCameraStatus('error');
       setError("Could not access camera. Please allow permissions.");
-      setIsCameraOpen(false);
+    } finally {
+      cameraStartRef.current = false;
     }
+  };
+
+  const stopDetectionLoop = () => {
+    if (detectionTimerRef.current) {
+      clearInterval(detectionTimerRef.current);
+      detectionTimerRef.current = null;
+    }
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    countdownValueRef.current = 0;
+    setCountdown(0);
+    setFaceDetected(false);
   };
 
   const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject;
-      const tracks = stream.getTracks();
-      tracks.forEach(track => track.stop());
+    stopDetectionLoop();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
-    setIsCameraOpen(false);
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraStatus('idle');
+  };
+
+  const loadFaceModel = async () => {
+    try {
+      const faceapi = await getFaceApi();
+      await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+      modelReadyRef.current = true;
+      setFaceModelStatus('ready');
+    } catch (err) {
+      console.error('Failed to load face detection model:', err);
+      modelReadyRef.current = false;
+      setFaceModelStatus('failed');
+    }
+  };
+
+  const detectFace = async () => {
+    const video = videoRef.current;
+    const detectCanvas = detectCanvasRef.current;
+    if (!video || !detectCanvas || !modelReadyRef.current || cameraStatusRef.current !== 'live') return;
+    if (video.readyState < 2 || !video.videoWidth) return;
+    if (faceDetectBusyRef.current) return;
+    faceDetectBusyRef.current = true;
+    try {
+      const faceapi = await getFaceApi();
+      const scaleW = 320;
+      const scaleH = Math.round((video.videoHeight / video.videoWidth) * scaleW);
+      detectCanvas.width = scaleW;
+      detectCanvas.height = scaleH;
+      const ctx = detectCanvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, detectCanvas.width, detectCanvas.height);
+      const detections = await faceapi.detectAllFaces(detectCanvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.45 }));
+      if (streamRef.current && !photoRef.current) {
+        const hasFace = detections && detections.length > 0;
+        setFaceDetected(hasFace);
+        if (hasFace) {
+          if (countdownTimerRef.current === null) startCountdown();
+        } else {
+          if (countdownTimerRef.current !== null) cancelCountdown();
+        }
+      }
+    } catch (err) {
+      if (err) {
+        // transient detection failures are ignored
+      }
+    } finally {
+      faceDetectBusyRef.current = false;
+    }
+  };
+
+  const startDetectionLoop = () => {
+    loadFaceModel();
+    if (detectionTimerRef.current) return;
+    detectionTimerRef.current = setInterval(detectFace, 400);
+  };
+
+  const startCountdown = () => {
+    countdownValueRef.current = 3;
+    setCountdown(3);
+    countdownTimerRef.current = setInterval(() => {
+      countdownValueRef.current -= 1;
+      const next = countdownValueRef.current;
+      setCountdown(next);
+      if (next <= 0) {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+        capturePhoto();
+      }
+    }, 1000);
+  };
+
+  const cancelCountdown = () => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    countdownValueRef.current = 0;
+    setCountdown(0);
   };
 
   const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
+    if (videoRef.current && canvasRef.current && streamRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      canvas.width = 320;
-      canvas.height = 240;
+      canvas.width = video.videoWidth || 960;
+      canvas.height = video.videoHeight || 720;
       const context = canvas.getContext('2d');
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const photoDataUrl = canvas.toDataURL('image/jpeg');
+      const photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      photoRef.current = photoDataUrl;
       setPhoto(photoDataUrl);
       stopCamera();
     }
   };
 
   const retakePhoto = () => {
+    photoRef.current = null;
     setPhoto(null);
+    setFaceDetected(false);
+    setCountdown(0);
     startCamera();
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      if (step === 3 && !photoRef.current) {
+        startCamera();
+      } else {
+        stopCamera();
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      stopCamera();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  useEffect(() => {
+    cameraStatusRef.current = cameraStatus;
+    if (cameraStatus === 'live' && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [cameraStatus]);
 
   const handleFrequentVisitorSelect = (profile) => {
     setShowLookup(false);
@@ -167,20 +344,38 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     let savedVisitor = null;
 
     try {
-      const docRef = await withTimeout(
-        addDoc(collection(db, 'visitors'), {
-          ...formData,
-          type: visitorType,
-          photoUrl: photo || null,
-          badgeNumber,
-          checkInTime: serverTimestamp(),
-          expectedCheckoutTime,
-          duration: formData.duration,
-          durationMinutes,
-          status: 'Active',
-          frequentVisitorId: frequentVisitorId || null,
-        })
-      );
+      const payload = {
+        ...formData,
+        type: visitorType,
+        photoUrl: photo || null,
+        badgeNumber,
+        checkInTime: serverTimestamp(),
+        expectedCheckoutTime,
+        duration: formData.duration,
+        durationMinutes,
+        status: 'Active',
+        frequentVisitorId: frequentVisitorId || null,
+      };
+
+      let docRef = null;
+      for (let attempt = 0; attempt <= FIREBASE_RETRIES; attempt += 1) {
+        try {
+          docRef = await withTimeout(addDoc(collection(db, 'visitors'), payload));
+          break;
+        } catch (err) {
+          // Only retry on transient/network failures, never on permission denials.
+          const transient =
+            err?.code === 'unavailable' ||
+            err?.code === 'deadline-exceeded' ||
+            err?.code === 'network-request-failed' ||
+            err?.code === 'resource-exhausted' ||
+            /timed out/i.test(err?.message || '');
+          if (attempt === FIREBASE_RETRIES || !transient) {
+            throw err;
+          }
+          console.warn(`Check-in write attempt ${attempt + 1} failed, retrying…`, err);
+        }
+      }
 
       savedVisitor = {
         id: docRef.id,
@@ -197,12 +392,14 @@ const CheckInForm = ({ onCheckInSuccess }) => {
       const code = err?.code || '';
       setError(
         code === 'permission-denied'
-          ? "Check-in was blocked: Firestore security rules deny this write."
+          ? "Check-in was blocked: Firestore security rules deny this write. Ask your administrator to deploy firestore.rules."
           : code === 'not-found'
             ? "Check-in failed: the Firestore database is not provisioned for this Firebase project."
             : /timed out/i.test(err?.message || '')
-              ? "Check-in failed: the Firestore write timed out. Enable the Cloud Firestore API and create the database for this Firebase project, then retry."
-              : "Failed to check in. Please try again."
+              ? "Check-in failed: the Firestore write timed out. Enable the Cloud Firestore API, create the database for this Firebase project, and deploy firestore.rules, then retry."
+              : code === 'unavailable' || /network/i.test(err?.message || '')
+                ? "Check-in failed: the connection was lost. Check your internet connection and try again."
+                : "Failed to check in. Please try again."
       );
     } finally {
       setLoading(false);
@@ -297,7 +494,8 @@ const CheckInForm = ({ onCheckInSuccess }) => {
           </button>
         </div>
 
-        <div className="absolute bottom-6 right-6 z-20">
+        <div className="absolute bottom-6 right-6 z-20 flex items-center gap-3">
+          <OnboardingGuide />
           <Link to="/admin" className="text-blue-500/50 hover:text-blue-400 text-sm font-medium transition-colors flex items-center gap-2">
             Admin Portal &rarr;
           </Link>
@@ -463,52 +661,123 @@ const CheckInForm = ({ onCheckInSuccess }) => {
 
           {/* Step 3: Photo Capture */}
           {step === 3 && (
-            <div className="animate-in fade-in slide-in-from-right-4 duration-500 flex flex-col items-center">
-              
-              <div className="relative w-full max-w-sm aspect-[3/4] bg-slate-100 rounded-2xl overflow-hidden border-2 border-dashed border-slate-300 mb-8 flex items-center justify-center">
-                
-                {/* Camera Viewers */}
-                {photo ? (
-                  <img src={photo} alt="Captured" className="w-full h-full object-cover" />
-                ) : (
-                  <>
-                    <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                    <canvas ref={canvasRef} className="hidden" />
-                    
-                    {/* Viewfinder overlay */}
-                    <div className="absolute inset-0 border-[40px] border-white/20 pointer-events-none"></div>
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="w-48 h-64 border-2 border-blue-500/50 rounded-full"></div>
+            <div className="animate-in fade-in slide-in-from-right-4 duration-500 flex flex-col items-center w-full max-w-md">
+              <div className="w-full rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 shadow-xl relative">
+                <div className="relative w-full aspect-[3/4] flex items-center justify-center overflow-hidden">
+                  {/* Camera / preview viewers */}
+                  {photo ? (
+                    <img src={photo} alt="Captured" className="absolute inset-0 w-full h-full object-cover" />
+                  ) : cameraStatus === 'live' ? (
+                    <>
+                      <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+                      <canvas ref={canvasRef} className="hidden" />
+                      <canvas ref={detectCanvasRef} className="hidden" />
+                    </>
+                  ) : null}
+
+                  {/* Face detection frame overlay */}
+                  {!photo && cameraStatus === 'live' && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <div className={`w-44 h-56 sm:w-52 sm:h-64 rounded-[3rem] border-4 transition-colors duration-300 ${
+                        faceDetected ? 'border-emerald-400' : 'border-sky-300'
+                      }`} />
+                      <p className={`mt-3 px-4 py-1.5 rounded-full text-sm font-semibold flex items-center gap-2 transition-colors ${
+                        faceDetected ? 'bg-emerald-500 text-white' : 'bg-slate-800/70 text-white'
+                      }`}>
+                        {faceDetected ? <Check size={16} /> : <ScanFace size={16} />}
+                        {faceDetected
+                          ? 'Face detected — hold still'
+                          : faceModelStatus === 'loading'
+                            ? 'Preparing camera…'
+                            : 'Position your face in the frame'}
+                      </p>
                     </div>
-                  </>
-                )}
-                
-                {!isCameraOpen && !photo && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100">
-                    <Camera size={48} className="text-slate-300 mb-4" />
-                    <p className="text-slate-500 font-medium text-center px-6">Camera is inactive</p>
-                    <button onClick={startCamera} className="mt-4 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-300 transition-colors">Start Camera</button>
-                  </div>
-                )}
+                  )}
+
+                  {/* Countdown overlay */}
+                  {!photo && countdown > 0 && cameraStatus === 'live' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-slate-900/40 pointer-events-none">
+                      <div className="w-28 h-28 rounded-full bg-white/95 shadow-2xl flex items-center justify-center">
+                        <span className="text-6xl font-extrabold text-[#0B192C]">{countdown}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Auto-capture unavailable notice */}
+                  {!photo && cameraStatus === 'live' && faceModelStatus === 'failed' && (
+                    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium pointer-events-none whitespace-nowrap">
+                      Auto-capture unavailable — use Capture Photo
+                    </div>
+                  )}
+
+                  {/* Camera starting */}
+                  {!photo && cameraStatus === 'starting' && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
+                      <Loader2 size={40} className="animate-spin text-white mb-4" />
+                      <p className="text-white font-medium">Starting camera…</p>
+                    </div>
+                  )}
+
+                  {/* Camera error */}
+                  {!photo && cameraStatus === 'error' && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 p-6 text-center">
+                      <CameraOff size={44} className="text-slate-300 mb-3" />
+                      <p className="text-slate-700 font-semibold">Camera unavailable</p>
+                      <p className="text-slate-500 text-sm mt-1 mb-5">Allow camera access in your browser to continue.</p>
+                      <button
+                        onClick={startCamera}
+                        className="flex items-center gap-2 bg-[#0B192C] hover:bg-[#14294a] text-white px-6 py-2.5 rounded-lg font-semibold transition-colors"
+                      >
+                        <RefreshCw size={16} /> Try Again
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Dark idle screen fallback */}
+                  {!photo && cameraStatus === 'idle' && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
+                      <p className="text-white font-medium">Preparing photo capture…</p>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex space-x-4 w-full max-w-sm">
+              <div className="mt-6 flex flex-col sm:flex-row gap-3 w-full">
                 {!photo ? (
-                  <button onClick={capturePhoto} disabled={!isCameraOpen} className="flex-1 bg-[#0B192C] hover:bg-[#14294a] text-white py-3 rounded-lg font-semibold flex items-center justify-center transition-colors disabled:opacity-50">
-                    <Camera size={18} className="mr-2" /> Capture Photo
-                  </button>
+                  <>
+                    <button
+                      onClick={capturePhoto}
+                      disabled={cameraStatus !== 'live'}
+                      className="flex-1 bg-[#0B192C] hover:bg-[#14294a] text-white py-3.5 rounded-xl font-semibold flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Camera size={18} className="mr-2" /> Capture Photo
+                    </button>
+                    {cameraStatus === 'error' && (
+                      <button
+                        onClick={() => setStep(4)}
+                        className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 py-3.5 rounded-xl font-semibold transition-colors"
+                      >
+                        Continue Without Photo
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <>
-                    <button onClick={retakePhoto} className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 py-3 rounded-lg font-semibold transition-colors">
+                    <button onClick={retakePhoto} className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 py-3.5 rounded-xl font-semibold transition-colors">
                       Retake
                     </button>
-                    <button onClick={() => setStep(4)} className="flex-1 bg-[#0B192C] hover:bg-[#14294a] text-white py-3 rounded-lg font-semibold transition-colors">
+                    <button onClick={() => setStep(4)} className="flex-1 bg-[#0B192C] hover:bg-[#14294a] text-white py-3.5 rounded-xl font-semibold transition-colors">
                       Next &rarr;
                     </button>
                   </>
                 )}
               </div>
 
+              {!photo && cameraStatus === 'live' && faceModelStatus === 'ready' && (
+                <p className="text-sm text-slate-500 mt-4 text-center">
+                  Your photo will be taken automatically when your face is detected.
+                </p>
+              )}
             </div>
           )}
 

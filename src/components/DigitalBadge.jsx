@@ -1,12 +1,23 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CheckCircle, Calendar, User, Briefcase, ArrowLeft, Star, Loader2, Clock, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { db } from '../firebase';
 import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
+import { getAppSettings, DEFAULT_BADGE_FOOTER } from '../lib/settings';
 
 const DigitalBadge = ({ visitor, onBack }) => {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [footerText, setFooterText] = useState(DEFAULT_BADGE_FOOTER);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAppSettings().then((settings) => {
+      if (cancelled) return;
+      if (settings.organizationName) setFooterText(settings.organizationName);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   if (!visitor) return null;
 
@@ -196,7 +207,7 @@ const DigitalBadge = ({ visitor, onBack }) => {
 
       <div className="p-4 text-center border-t" style={{ background: 'var(--bg-subtle)', borderColor: 'var(--border-color)' }}>
         <p className="text-[10px] font-medium uppercase tracking-[0.2em]" style={{ color: 'var(--text-muted)' }}>
-          Powered by VisitorPro Management
+          {footerText}
         </p>
       </div>
     </div>

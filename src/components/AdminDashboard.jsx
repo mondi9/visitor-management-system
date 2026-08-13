@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { db } from '../firebase';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { UserCheck, LogOut, Calendar, Menu, Users, Bell, ArrowUpRight, ArrowDownRight, Activity, Clock, Plus, AlertCircle, Loader2 } from 'lucide-react';
+import { UserCheck, LogOut, Calendar, Menu, Users, Bell, Activity, Clock, Plus, AlertCircle, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import Sidebar from './Sidebar';
 import ExtendVisitModal from './ExtendVisitModal';
@@ -46,6 +47,51 @@ const AdminDashboard = () => {
   const activeNow = visitors.filter(v => v.status !== 'Checked Out').length;
   const checkedInToday = visitors.filter(v => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd')).length;
   const checkedOutToday = visitors.filter(v => v.status === 'Checked Out' && v.checkOutTime && format(v.checkOutTime, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd')).length;
+  const checkedInYesterday = visitors.filter((v) => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === format(new Date(now.getTime() - 86400000), 'yyyy-MM-dd')).length;
+
+  // Weekly trend (last 7 days), derived from actual check-in records.
+  const weekTrend = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (6 - i));
+    const key = format(d, 'yyyy-MM-dd');
+    return {
+      date: format(d, 'dd'),
+      label: format(d, 'EEE'),
+      count: visitors.filter((v) => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === key).length,
+    };
+  });
+  const maxDay = Math.max(...weekTrend.map((d) => d.count), 1);
+
+  // Visitors grouped by purpose, for the segmented donut + legend.
+  const purposeCounts = visitors.reduce((acc, v) => {
+    const key = v.purpose || 'Other';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const purposes = Object.entries(purposeCounts).sort((a, b) => b[1] - a[1]);
+  const PURPOSE_COLORS = ['#2563eb', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4'];
+  const donutStyle =
+    totalVisitors === 0
+      ? { background: '#e2e8f0' }
+      : (() => {
+          let cursor = 0;
+          const stops = purposes.map(([, count], i) => {
+            const start = cursor;
+            cursor += (count / totalVisitors) * 360;
+            return `${PURPOSE_COLORS[i % PURPOSE_COLORS.length]} ${start}deg ${cursor}deg`;
+          });
+          return { background: `conic-gradient(${stops.join(', ')})` };
+        })();
+
+  // Top hosts ranked by number of visits.
+  const hostCounts = visitors.reduce((acc, v) => {
+    if (!v.hostName) return acc;
+    const key = v.hostName;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const topHosts = Object.entries(hostCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
 
   const handleCheckOut = async (visitorId) => {
     setCheckingOutId(visitorId);
@@ -105,10 +151,14 @@ const AdminDashboard = () => {
               <Clock size={16} />
               <span>{format(now, 'hh:mm:ss a')}</span>
             </div>
-            <button className="p-2 border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 relative">
+            <Link
+              to="/admin/notifications"
+              className="p-2 border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 relative"
+              title="Notifications"
+            >
               <Bell size={20} />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>
-            </button>
+            </Link>
           </div>
         </header>
 
@@ -129,9 +179,8 @@ const AdminDashboard = () => {
                 <p className="text-sm font-medium text-slate-500 mb-1">Total Visitors</p>
                 <div className="flex items-baseline space-x-3">
                   <h2 className="text-3xl font-bold text-slate-800">{totalVisitors}</h2>
-                  <span className="flex items-center text-xs font-semibold text-emerald-500"><ArrowUpRight size={14} className="mr-0.5"/> 12%</span>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">vs yesterday</p>
+                <p className="text-xs text-slate-400 mt-1">all records</p>
               </div>
               <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
                 <Users size={24} />
@@ -157,9 +206,14 @@ const AdminDashboard = () => {
                 <p className="text-sm font-medium text-slate-500 mb-1">Checked In Today</p>
                 <div className="flex items-baseline space-x-3">
                   <h2 className="text-3xl font-bold text-slate-800">{checkedInToday}</h2>
-                  <span className="flex items-center text-xs font-semibold text-emerald-500"><ArrowUpRight size={14} className="mr-0.5"/> 8%</span>
+                  {checkedInYesterday > 0 && (
+                    <span className={`flex items-center text-xs font-semibold ${checkedInToday >= checkedInYesterday ? 'text-emerald-500' : 'text-rose-500'}`}>
+                      {checkedInToday >= checkedInYesterday ? <Activity size={14} className="mr-0.5" /> : <LogOut size={14} className="mr-0.5" />}
+                      {checkedInToday >= checkedInYesterday ? '+' : ''}{checkedInToday - checkedInYesterday} vs yest.
+                    </span>
+                  )}
                 </div>
-                <p className="text-xs text-slate-400 mt-1">vs yesterday</p>
+                <p className="text-xs text-slate-400 mt-1">today's check-ins</p>
               </div>
               <div className="w-12 h-12 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">
                 <Activity size={24} />
@@ -171,9 +225,8 @@ const AdminDashboard = () => {
                 <p className="text-sm font-medium text-slate-500 mb-1">Checked Out Today</p>
                 <div className="flex items-baseline space-x-3">
                   <h2 className="text-3xl font-bold text-slate-800">{checkedOutToday}</h2>
-                  <span className="flex items-center text-xs font-semibold text-rose-500"><ArrowDownRight size={14} className="mr-0.5"/> 5%</span>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">vs yesterday</p>
+                <p className="text-xs text-slate-400 mt-1">today's check-outs</p>
               </div>
               <div className="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center text-orange-500">
                 <LogOut size={24} />
@@ -293,49 +346,68 @@ const AdminDashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
             <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm lg:col-span-1">
               <h3 className="font-bold text-slate-800 mb-4">Visitor Trend (This Week)</h3>
-              <div className="h-48 w-full border-b border-l border-slate-200 relative flex items-end">
-                <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <polyline fill="none" stroke="#2563eb" strokeWidth="2" points="0,80 20,40 40,60 60,20 80,50 100,10" />
-                  <circle cx="20" cy="40" r="2" fill="#2563eb" />
-                  <circle cx="40" cy="60" r="2" fill="#2563eb" />
-                  <circle cx="60" cy="20" r="2" fill="#2563eb" />
-                  <circle cx="80" cy="50" r="2" fill="#2563eb" />
-                </svg>
+              <div className="flex items-end justify-between h-48 gap-2">
+                {weekTrend.map((day) => (
+                  <div key={day.label} className="flex flex-col items-center flex-1">
+                    <span className="text-[10px] text-slate-500 font-semibold mb-1">{day.count}</span>
+                    <div className="w-full rounded-t-lg bg-blue-600/80 transition-all"
+                      style={{ height: `${Math.max((day.count / maxDay) * 100, 3)}%`, minHeight: day.count > 0 ? '8px' : '3px' }}
+                      title={`${day.label}: ${day.count}`}
+                    ></div>
+                    <div className="py-1 text-[10px] text-slate-400">{day.date}</div>
+                  </div>
+                ))}
               </div>
             </div>
 
             <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
               <h3 className="font-bold text-slate-800 mb-4">Visitors by Purpose</h3>
-              <div className="flex flex-col items-center justify-center h-48">
-                <div className="w-32 h-32 rounded-full border-[16px] border-[#2563eb] border-t-emerald-400 border-l-purple-400 relative flex items-center justify-center mb-4">
-                  <div className="text-center">
-                    <span className="block text-2xl font-bold text-slate-800">{totalVisitors}</span>
-                    <span className="text-[10px] text-slate-400 uppercase">Total</span>
+              {totalVisitors === 0 ? (
+                <div className="flex items-center justify-center h-48 text-sm text-slate-400">No data yet.</div>
+              ) : (
+                <div className="flex flex-col sm:flex-row items-center gap-6">
+                  <div className="relative w-36 h-36 rounded-full flex-shrink-0" style={donutStyle}>
+                    <div className="absolute inset-[18px] bg-white rounded-full flex items-center justify-center flex-col">
+                      <span className="text-2xl font-bold text-slate-800">{totalVisitors}</span>
+                      <span className="text-[10px] text-slate-400 uppercase">Total</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2 flex-1 w-full">
+                    {purposes.slice(0, 6).map(([purpose, count], i) => (
+                      <div key={purpose} className="flex items-center text-xs">
+                        <span className="w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0" style={{ background: PURPOSE_COLORS[i % PURPOSE_COLORS.length] }} />
+                        <span className="text-slate-600 truncate flex-1">{purpose}</span>
+                        <span className="font-bold text-slate-800 ml-2">{count}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
               <h3 className="font-bold text-slate-800 mb-4">Top Visiting Hosts</h3>
-              <div className="space-y-4">
-                {[
-                  { name: 'Adewale Okafor', visits: 18, init: 'AO', bg: 'bg-blue-100 text-blue-600' },
-                  { name: 'Funmi Adebayo', visits: 15, init: 'FA', bg: 'bg-purple-100 text-purple-600' },
-                  { name: 'Michael Johnson', visits: 12, init: 'MJ', bg: 'bg-emerald-100 text-emerald-600' },
-                  { name: 'Bola Ahmed', visits: 10, init: 'BA', bg: 'bg-orange-100 text-orange-600' }
-                ].map((host, i) => (
-                  <div key={i} className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${host.bg}`}>
-                        {host.init}
+              {topHosts.length === 0 ? (
+                <div className="flex items-center justify-center h-48 text-sm text-slate-400">No visits yet.</div>
+              ) : (
+                <div className="space-y-4">
+                  {topHosts.map(([name, visits], i) => {
+                    const initials = name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+                    const bg = ['bg-blue-100 text-blue-600', 'bg-purple-100 text-purple-600', 'bg-emerald-100 text-emerald-600', 'bg-orange-100 text-orange-600', 'bg-rose-100 text-rose-600'][i % 5];
+                    return (
+                      <div key={name} className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${bg}`}>
+                            {initials || '?'}
+                          </div>
+                          <span className="text-sm font-medium text-slate-700 truncate">{name}</span>
+                        </div>
+                        <span className="font-bold text-slate-800 flex-shrink-0">{visits}</span>
                       </div>
-                      <span className="text-sm font-medium text-slate-700">{host.name}</span>
-                    </div>
-                    <span className="font-bold text-slate-800">{host.visits}</span>
-                  </div>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 

@@ -5,6 +5,19 @@ import DigitalBadge from './components/DigitalBadge';
 import AdminDashboard from './components/AdminDashboard';
 import FrequentVisitorsDashboard from './components/FrequentVisitorsDashboard';
 import StayMonitor from './components/StayMonitor';
+import AdminRoute from './components/AdminRoute';
+import ResetPassword from './components/ResetPassword';
+import AdminVisitors from './components/AdminVisitors';
+import AdminPreRegistrations from './components/AdminPreRegistrations';
+import AdminHosts from './components/AdminHosts';
+import AdminContractors from './components/AdminContractors';
+import AdminDeliveries from './components/AdminDeliveries';
+import AdminReports from './components/AdminReports';
+import AdminSettings from './components/AdminSettings';
+import AdminUsers from './components/AdminUsers';
+import AdminNotifications from './components/AdminNotifications';
+import { AuthProvider } from './context/AuthContext';
+import { ROLES } from './lib/roles';
 
 const CheckInFlow = () => {
   const [currentVisitor, setCurrentVisitor] = useState(null);
@@ -26,20 +39,43 @@ const CheckInFlow = () => {
   );
 };
 
+const allRoles = [ROLES.SUPER_ADMIN, ROLES.RECEPTIONIST, ROLES.SECURITY_OFFICER];
+const deskRoles = [ROLES.SUPER_ADMIN, ROLES.RECEPTIONIST];
+
 function App() {
   return (
     <Router>
-      <StayMonitor />
-      <div className="min-h-screen font-sans bg-[var(--bg-primary)] text-[var(--text-primary)]">
-        <Routes>
-          <Route path="/" element={<CheckInFlow />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/visitors" element={<AdminDashboard />} />
-          <Route path="/admin/notifications" element={<AdminDashboard />} />
-          <Route path="/admin/settings" element={<AdminDashboard />} />
-          <Route path="/admin/frequent-visitors" element={<FrequentVisitorsDashboard />} />
-        </Routes>
-      </div>
+      <AuthProvider>
+        <div className="min-h-screen font-sans bg-[var(--bg-primary)] text-[var(--text-primary)]">
+          <StayMonitor />
+          <Routes>
+            {/* Public kiosk */}
+            <Route path="/" element={<CheckInFlow />} />
+
+            {/* Admin portal */}
+            <Route path="/admin" element={<AdminRoute roles={allRoles}><AdminDashboard /></AdminRoute>} />
+            <Route path="/admin/visitors" element={<AdminRoute roles={allRoles}><AdminVisitors /></AdminRoute>} />
+            <Route path="/admin/frequent-visitors" element={<AdminRoute roles={deskRoles}><FrequentVisitorsDashboard /></AdminRoute>} />
+            <Route path="/admin/pre-registrations" element={<AdminRoute roles={deskRoles}><AdminPreRegistrations /></AdminRoute>} />
+            <Route path="/admin/hosts" element={<AdminRoute roles={deskRoles}><AdminHosts /></AdminRoute>} />
+            <Route path="/admin/contractors" element={<AdminRoute roles={deskRoles}><AdminContractors /></AdminRoute>} />
+            <Route path="/admin/deliveries" element={<AdminRoute roles={deskRoles}><AdminDeliveries /></AdminRoute>} />
+            <Route path="/admin/reports" element={<AdminRoute roles={allRoles}><AdminReports /></AdminRoute>} />
+            <Route path="/admin/settings" element={<AdminRoute roles={[ROLES.SUPER_ADMIN]}><AdminSettings /></AdminRoute>} />
+            <Route path="/admin/users" element={<AdminRoute roles={[ROLES.SUPER_ADMIN]}><AdminUsers /></AdminRoute>} />
+            <Route path="/admin/notifications" element={<AdminRoute roles={allRoles}><AdminNotifications /></AdminRoute>} />
+
+            {/* Public password-recovery page reached from the reset email link */}
+            <Route path="/admin/reset-password" element={<ResetPassword />} />
+
+            {/* Fallback: unknown admin route */}
+            <Route path="/admin/*" element={<AdminRoute roles={allRoles}><AdminDashboard /></AdminRoute>} />
+
+            {/* Fallback: unknown public route */}
+            <Route path="*" element={<CheckInFlow />} />
+          </Routes>
+        </div>
+      </AuthProvider>
     </Router>
   );
 }

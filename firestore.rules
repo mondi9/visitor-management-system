@@ -1,0 +1,84 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ----- Kiosk (public, unauthenticated) -----
+    // The check-in kiosk runs without a login, so public access is required
+    // to create visitor records and read frequent-visitor profiles.
+
+    match /visitors/{id} {
+      // The kiosk creates check-in records without a login.
+      allow create: if true;
+      // Only staff may read or modify records (check-out, extend, reports,
+      // stay monitor). The kiosk never reads this collection.
+      allow read, update, delete: if isStaff();
+    }
+
+    match /frequentVisitors/{id} {
+      // Kiosk returning-visitor lookup (read) and "Save as Frequent Visitor" (create).
+      allow read, create: if true;
+      allow update, delete: if isStaff();
+    }
+
+    match /deliveries/{id} {
+      // The kiosk's "delivery" type is logged to the visitors collection, so
+      // the deliveries ledger is staff-managed only.
+      allow read, create, update, delete: if isStaff();
+    }
+
+    // ----- Staff-only directories -----
+    match /hosts/{id} {
+      allow read, write: if isStaff();
+    }
+
+    match /contractors/{id} {
+      allow read, write: if isStaff();
+    }
+
+    match /preRegistrations/{id} {
+      allow read, write: if isStaff();
+    }
+
+    // ----- App settings (Super Admin writes; readable by all) -----
+    // The unauthenticated kiosk reads the default visit duration and the
+    // organization name for badges, so reads are public.
+    match /appSettings/{id} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // ----- Users / roles -----
+    // A user may read their own record; Super Admins manage everyone.
+    // The first Super Admin must be created in the Firebase Console
+    // (Authentication -> Add user, then Firestore -> users/<uid> with
+    // role "super-admin"). In-app signups can only create Receptionists,
+    // so no account can ever elevate its own role.
+    match /users/{uid} {
+      allow read: if isSignedIn() && (isSuperAdmin() || uid == request.auth.uid);
+      allow create: if isSignedIn()
+        && uid == request.auth.uid
+        && request.resource.data.role == 'receptionist';
+      allow update, delete: if isSuperAdmin();
+    }
+  }
+
+  // ---------- Helper functions ----------
+  function isSignedIn() {
+    return request.auth != null;
+  }
+
+  function getRole(uid) {
+    // Role is stored on the users/{uid} document.
+    return get(/databases/$(database)/documents/users/$(uid)).data.role;
+  }
+
+  function isStaff() {
+    return isSignedIn() && getRole(request.auth.uid) in
+      ['super-admin', 'receptionist', 'security-officer'];
+  }
+
+  function isSuperAdmin() {
+    return isSignedIn() && getRole(request.auth.uid) == 'super-admin';
+  }
+}
