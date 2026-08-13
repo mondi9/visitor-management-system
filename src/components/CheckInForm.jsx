@@ -1,10 +1,59 @@
 import { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
-import { User, Truck, Camera, Check, ChevronRight, CheckCircle2, ChevronLeft, Loader2, Star } from 'lucide-react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { User, Truck, Camera, Check, ChevronRight, ChevronLeft, Loader2, Star, UserCheck, ClipboardList, Clock, CalendarClock } from 'lucide-react';
+import { format } from 'date-fns';
 import emailjs from '@emailjs/browser';
 import FrequentVisitorLookup from './FrequentVisitorLookup';
+
+const FIREBASE_TIMEOUT_MS = 10000;
+const EMAIL_TIMEOUT_MS = 10000;
+
+const DURATION_OPTIONS = ['30 Minutes', '1 Hour', '2 Hours', '3 Hours', 'Half Day', 'Full Day'];
+
+const DURATION_MINUTES = {
+  '30 Minutes': 30,
+  '1 Hour': 60,
+  '2 Hours': 120,
+  '3 Hours': 180,
+  'Half Day': 360,
+  'Full Day': 480,
+};
+
+const EMAILJS_CONFIG = {
+  serviceId: import.meta.env.VITE_EMAILJS_SERVICE_ID,
+  templateId: import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
+  publicKey: import.meta.env.VITE_EMAILJS_PUBLIC_KEY,
+};
+
+if (EMAILJS_CONFIG.publicKey) {
+  emailjs.init({ publicKey: EMAILJS_CONFIG.publicKey });
+}
+
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const getExpectedCheckout = (duration) => {
+  const minutes = DURATION_MINUTES[duration] || 60;
+  return new Date(Date.now() + minutes * 60 * 1000);
+};
+
+const withTimeout = (promise, ms = FIREBASE_TIMEOUT_MS) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Request timed out after ${ms}ms`)), ms)
+    )
+  ]);
+
+const generateBadgeNumber = () => {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const seq = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `VMS-${yyyy}${mm}${dd}-${seq}`;
+};
 
 const CheckInForm = ({ onCheckInSuccess }) => {
   const [step, setStep] = useState(0); // 0: Home, 1: Details, 2: Visit, 3: Photo, 4: Confirm
@@ -22,11 +71,13 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     hostName: '',
     hostEmail: '',
     purpose: 'Business Meeting',
+    duration: '30 Minutes',
     agreed: false
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [emailWarning, setEmailWarning] = useState('');
   
   // Camera state
   const [photo, setPhoto] = useState(null);
@@ -99,9 +150,38 @@ const CheckInForm = ({ onCheckInSuccess }) => {
       hostName: profile.defaultHostName || '',
       hostEmail: profile.defaultHostEmail || '',
       purpose: profile.defaultPurpose || 'Business Meeting',
+      duration: profile.defaultDuration || '30 Minutes',
     }));
     // Skip personal details — go straight to visit details
     setStep(2);
+  };
+
+  const sendConfirmationEmail = async (visitor, expectedCheckoutTime) => {
+    const { serviceId, templateId, publicKey } = EMAILJS_CONFIG;
+    if (!serviceId || !templateId || !publicKey) {
+      console.warn('EmailJS is not configured — skipping confirmation email.');
+      return;
+    }
+    if (!visitor.email) return;
+
+    try {
+      await withTimeout(
+        emailjs.send(serviceId, templateId, {
+          email: visitor.email,
+          visitor_name: visitor.name,
+          badge_number: visitor.badgeNumber,
+          host_name: visitor.hostName,
+          purpose: visitor.purpose,
+          duration: visitor.duration,
+          checkin_time: format(visitor.checkInTime, 'MMM d, h:mm a'),
+          checkout_time: format(expectedCheckoutTime, 'MMM d, h:mm a'),
+        }),
+        EMAIL_TIMEOUT_MS
+      );
+    } catch (err) {
+      console.error('Failed to send confirmation email:', err);
+      setEmailWarning('Check-in saved, but the confirmation email could not be sent.');
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -110,45 +190,70 @@ const CheckInForm = ({ onCheckInSuccess }) => {
       setError("You must agree to the terms and conditions.");
       return;
     }
+    if (!formData.email) {
+      setError("Please provide an email address so we can send your confirmation.");
+      return;
+    }
+    if (!isValidEmail(formData.email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
 
     setLoading(true);
     setError('');
+    setEmailWarning('');
+
+    const badgeNumber = generateBadgeNumber();
+    const checkInTime = new Date();
+    const expectedCheckoutTime = getExpectedCheckout(formData.duration);
+    const durationMinutes = DURATION_MINUTES[formData.duration] || 60;
+    let savedVisitor = null;
 
     try {
-      const docRef = await addDoc(collection(db, 'visitors'), {
+      const docRef = await withTimeout(
+        addDoc(collection(db, 'visitors'), {
+          ...formData,
+          type: visitorType,
+          photoUrl: photo || null,
+          badgeNumber,
+          checkInTime: serverTimestamp(),
+          expectedCheckoutTime,
+          duration: formData.duration,
+          durationMinutes,
+          status: 'Active',
+          frequentVisitorId: frequentVisitorId || null,
+        })
+      );
+
+      savedVisitor = {
+        id: docRef.id,
+        badgeNumber,
         ...formData,
         type: visitorType,
-        photoUrl: photo || null,
-        checkInTime: serverTimestamp(),
-        status: 'Active',
-        frequentVisitorId: frequentVisitorId || null,
-      });
-
-      // Send email
-      if (formData.hostEmail) {
-        try {
-          await emailjs.send(
-            'service_pudj21h',
-            'template_g63m5w7',
-            {
-              to_email: formData.hostEmail,
-              to_name: formData.hostName,
-              visitor_name: formData.name,
-              purpose: formData.purpose
-            },
-            '8YlVwO1i4WdIf-sYn'
-          );
-        } catch (emailErr) {
-          console.error("Failed to send email notification:", emailErr);
-        }
-      }
-
-      onCheckInSuccess({ id: docRef.id, ...formData, type: visitorType, photoUrl: photo, checkInTime: new Date() });
+        photoUrl: photo,
+        checkInTime,
+        expectedCheckoutTime,
+        durationMinutes,
+      };
     } catch (err) {
       console.error("Error adding document: ", err);
-      setError("Failed to check in. Please try again.");
+      const code = err?.code || '';
+      setError(
+        code === 'permission-denied'
+          ? "Check-in was blocked: Firestore security rules deny this write."
+          : code === 'not-found'
+            ? "Check-in failed: the Firestore database is not provisioned for this Firebase project."
+            : /timed out/i.test(err?.message || '')
+              ? "Check-in failed: the Firestore write timed out. Enable the Cloud Firestore API and create the database for this Firebase project, then retry."
+              : "Failed to check in. Please try again."
+      );
     } finally {
       setLoading(false);
+    }
+
+    if (savedVisitor) {
+      await sendConfirmationEmail(savedVisitor, expectedCheckoutTime);
+      onCheckInSuccess({ ...savedVisitor, emailWarning });
     }
   };
 
@@ -297,8 +402,8 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                   <input required type="tel" name="phone" value={formData.phone} onChange={handleInputChange} className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="+1 234 567 8900" />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">Email</label>
-                  <input type="email" name="email" value={formData.email} onChange={handleInputChange} className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="john.smith@example.com" />
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Email *</label>
+                  <input required type="email" name="email" value={formData.email} onChange={handleInputChange} className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="john.smith@example.com" />
                 </div>
               </div>
 
@@ -323,6 +428,14 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                   onClick={() => {
                     if(!formData.name || !formData.phone) {
                       setError("Please fill in required fields.");
+                      return;
+                    }
+                    if (!formData.email) {
+                      setError("Please provide an email address so we can send your confirmation.");
+                      return;
+                    }
+                    if (!isValidEmail(formData.email)) {
+                      setError("Please enter a valid email address.");
                       return;
                     }
                     setError('');
@@ -360,6 +473,16 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                   <option>Site Inspection</option>
                   <option>Other</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Expected Duration *</label>
+                <select name="duration" value={formData.duration} onChange={handleInputChange} className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all bg-white">
+                  {DURATION_OPTIONS.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">Your expected checkout time is calculated automatically.</p>
               </div>
 
               <div className="pt-6 flex justify-end">
@@ -451,6 +574,14 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                 <div className="grid grid-cols-[120px_1fr] items-start">
                   <span className="text-slate-500 font-medium text-sm flex items-center"><ClipboardList size={16} className="mr-2"/> Purpose</span>
                   <span className="font-semibold text-slate-800">{formData.purpose}</span>
+                </div>
+                <div className="grid grid-cols-[120px_1fr] items-start">
+                  <span className="text-slate-500 font-medium text-sm flex items-center"><Clock size={16} className="mr-2"/> Duration</span>
+                  <span className="font-semibold text-slate-800">{formData.duration}</span>
+                </div>
+                <div className="grid grid-cols-[120px_1fr] items-start">
+                  <span className="text-slate-500 font-medium text-sm flex items-center"><CalendarClock size={16} className="mr-2"/> Expected Checkout</span>
+                  <span className="font-semibold text-slate-800">{format(getExpectedCheckout(formData.duration), 'MMM d, h:mm a')}</span>
                 </div>
               </div>
 

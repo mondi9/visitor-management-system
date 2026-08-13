@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle, Calendar, User, Briefcase, ArrowLeft, Star, Loader2 } from 'lucide-react';
+import { CheckCircle, Calendar, User, Briefcase, ArrowLeft, Star, Loader2, Clock, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { db } from '../firebase';
 import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
@@ -35,6 +35,7 @@ const DigitalBadge = ({ visitor, onBack }) => {
         defaultHostName: visitor.hostName || '',
         defaultHostEmail: visitor.hostEmail || '',
         defaultPurpose: visitor.purpose || 'Business Meeting',
+        defaultDuration: visitor.duration || '30 Minutes',
         visitCount: 1,
         lastVisit: serverTimestamp(),
         createdAt: serverTimestamp(),
@@ -58,8 +59,8 @@ const DigitalBadge = ({ visitor, onBack }) => {
 
         <div className="relative z-10 flex flex-col items-center">
           <div className="relative mb-6">
-            {visitor.photo ? (
-              <img src={visitor.photo} alt="Visitor" className="w-24 h-24 rounded-full object-cover shadow-xl ring-4 ring-emerald-400 bg-white" />
+            {visitor.photoUrl ? (
+              <img src={visitor.photoUrl} alt="Visitor" className="w-24 h-24 rounded-full object-cover shadow-xl ring-4 ring-emerald-400 bg-white" />
             ) : (
               <div className="bg-white text-emerald-600 w-24 h-24 rounded-full flex items-center justify-center shadow-xl ring-4 ring-emerald-400">
                 <img src="/logo.png" alt="SecurePass Logo" className="w-16 h-16 rounded-xl" />
@@ -78,6 +79,27 @@ const DigitalBadge = ({ visitor, onBack }) => {
       <div className="p-8 space-y-8" style={{ background: 'var(--bg-subtle)' }}>
         <div className="space-y-6">
 
+          {visitor.emailWarning && (
+            <div className="p-4 rounded-2xl border-2 border-amber-400 bg-amber-50 text-amber-700 text-sm font-medium flex items-start space-x-3">
+              <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
+              <span>{visitor.emailWarning}</span>
+            </div>
+          )}
+
+          {visitor.badgeNumber && (
+            <div className="flex items-center justify-center gap-3 p-4 rounded-2xl border-2 border-dashed"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--accent)', color: 'var(--accent-text)' }}
+            >
+              <div className="p-2 rounded-lg" style={{ background: 'var(--accent-light)' }}>
+                <CheckCircle size={22} />
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Badge Number</p>
+                <p className="text-xl font-extrabold tracking-wide">{visitor.badgeNumber}</p>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center space-x-4 p-4 rounded-2xl shadow-sm border"
             style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
           >
@@ -94,6 +116,7 @@ const DigitalBadge = ({ visitor, onBack }) => {
             {[
               { icon: <Briefcase size={16} />, label: 'Purpose', value: visitor.purpose },
               { icon: <User size={16} />, label: 'Host', value: visitor.hostName },
+              { icon: <Clock size={16} />, label: 'Duration', value: visitor.duration || '—' },
             ].map(({ icon, label, value }) => (
               <div key={label} className="flex flex-col p-4 rounded-2xl shadow-sm border"
                 style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
@@ -121,11 +144,11 @@ const DigitalBadge = ({ visitor, onBack }) => {
                   </p>
                 </div>
               </div>
-              {visitor.expiryTime && (
+              {visitor.expectedCheckoutTime && (
                 <div className="text-right border-l pl-4" style={{ borderColor: 'var(--border-color)' }}>
-                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Expires</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Expected Checkout</p>
                   <p className="font-bold text-rose-500">
-                    {format(visitor.expiryTime, 'h:mm a')}
+                    {format(visitor.expectedCheckoutTime, 'h:mm a')}
                   </p>
                 </div>
               )}

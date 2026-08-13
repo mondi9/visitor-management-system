@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { Search, UserCheck, UserX, Clock, LogOut, Loader2, Calendar, Menu, Users, Timer, Plus, AlertTriangle, Bell, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
-import { format, differenceInMinutes, addMinutes } from 'date-fns';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { UserCheck, LogOut, Calendar, Menu, Users, Bell, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
+import { format } from 'date-fns';
 import Sidebar from './Sidebar';
 
 const AdminDashboard = () => {
   const [visitors, setVisitors] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const q = query(collection(db, 'visitors'), orderBy('checkInTime', 'desc'));
@@ -18,11 +16,11 @@ const AdminDashboard = () => {
       const visitorData = snapshot.docs.map(doc => {
         const data = doc.data();
         const checkInTime = data.checkInTime?.toDate();
-        const expiryTime = data.expiryTime?.toDate();
+        const expectedCheckoutTime = data.expectedCheckoutTime?.toDate() || data.expiryTime?.toDate();
         const checkOutTime = data.checkOutTime?.toDate();
 
         let status = data.status;
-        if (status === 'Active' && expiryTime && new Date() > expiryTime) {
+        if (status === 'Active' && expectedCheckoutTime && new Date() > expectedCheckoutTime) {
           status = 'Overstayed';
         }
 
@@ -30,23 +28,18 @@ const AdminDashboard = () => {
           id: doc.id,
           ...data,
           checkInTime,
-          expiryTime,
+          expectedCheckoutTime,
           checkOutTime,
           status
         };
       });
       setVisitors(visitorData);
-      setLoading(false);
     }, (err) => {
       console.error("Firestore error:", err);
-      setLoading(false);
     });
-
-    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
 
     return () => {
       unsubscribe();
-      clearInterval(timer);
     };
   }, []);
 
