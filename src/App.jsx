@@ -4,6 +4,7 @@ import CheckInForm from './components/CheckInForm';
 import DigitalBadge from './components/DigitalBadge';
 import AdminDashboard from './components/AdminDashboard';
 import FrequentVisitorsDashboard from './components/FrequentVisitorsDashboard';
+import StayMonitor from './components/StayMonitor';
 
 const CheckInFlow = () => {
   const [currentVisitor, setCurrentVisitor] = useState(null);
@@ -28,6 +29,7 @@ const CheckInFlow = () => {
 function App() {
   return (
     <Router>
+      <StayMonitor />
       <div className="min-h-screen font-sans bg-[var(--bg-primary)] text-[var(--text-primary)]">
         <Routes>
           <Route path="/" element={<CheckInFlow />} />

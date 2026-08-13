@@ -4,39 +4,13 @@ import { db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { User, Truck, Camera, Check, ChevronRight, ChevronLeft, Loader2, Star, UserCheck, ClipboardList, Clock, CalendarClock } from 'lucide-react';
 import { format } from 'date-fns';
-import emailjs from '@emailjs/browser';
 import FrequentVisitorLookup from './FrequentVisitorLookup';
+import { DURATION_OPTIONS, DURATION_MINUTES, getExpectedCheckout } from '../lib/visitUtils';
+import { sendVisitEmail } from '../lib/email';
 
 const FIREBASE_TIMEOUT_MS = 10000;
-const EMAIL_TIMEOUT_MS = 10000;
-
-const DURATION_OPTIONS = ['30 Minutes', '1 Hour', '2 Hours', '3 Hours', 'Half Day', 'Full Day'];
-
-const DURATION_MINUTES = {
-  '30 Minutes': 30,
-  '1 Hour': 60,
-  '2 Hours': 120,
-  '3 Hours': 180,
-  'Half Day': 360,
-  'Full Day': 480,
-};
-
-const EMAILJS_CONFIG = {
-  serviceId: import.meta.env.VITE_EMAILJS_SERVICE_ID,
-  templateId: import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
-  publicKey: import.meta.env.VITE_EMAILJS_PUBLIC_KEY,
-};
-
-if (EMAILJS_CONFIG.publicKey) {
-  emailjs.init({ publicKey: EMAILJS_CONFIG.publicKey });
-}
 
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
-const getExpectedCheckout = (duration) => {
-  const minutes = DURATION_MINUTES[duration] || 60;
-  return new Date(Date.now() + minutes * 60 * 1000);
-};
 
 const withTimeout = (promise, ms = FIREBASE_TIMEOUT_MS) =>
   Promise.race([
@@ -156,28 +130,11 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     setStep(2);
   };
 
-  const sendConfirmationEmail = async (visitor, expectedCheckoutTime) => {
-    const { serviceId, templateId, publicKey } = EMAILJS_CONFIG;
-    if (!serviceId || !templateId || !publicKey) {
-      console.warn('EmailJS is not configured — skipping confirmation email.');
-      return;
-    }
-    if (!visitor.email) return;
-
+  const sendConfirmationEmail = async (visitor) => {
     try {
-      await withTimeout(
-        emailjs.send(serviceId, templateId, {
-          email: visitor.email,
-          visitor_name: visitor.name,
-          badge_number: visitor.badgeNumber,
-          host_name: visitor.hostName,
-          purpose: visitor.purpose,
-          duration: visitor.duration,
-          checkin_time: format(visitor.checkInTime, 'MMM d, h:mm a'),
-          checkout_time: format(expectedCheckoutTime, 'MMM d, h:mm a'),
-        }),
-        EMAIL_TIMEOUT_MS
-      );
+      await sendVisitEmail(visitor, {
+        message: 'Your check-in is confirmed. Please present this badge at reception.',
+      });
     } catch (err) {
       console.error('Failed to send confirmation email:', err);
       setEmailWarning('Check-in saved, but the confirmation email could not be sent.');
@@ -252,7 +209,7 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     }
 
     if (savedVisitor) {
-      await sendConfirmationEmail(savedVisitor, expectedCheckoutTime);
+      await sendConfirmationEmail(savedVisitor);
       onCheckInSuccess({ ...savedVisitor, emailWarning });
     }
   };
