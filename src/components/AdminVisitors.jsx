@@ -8,11 +8,15 @@ import {
 import { format } from 'date-fns';
 import AdminLayout from './AdminLayout';
 import ExtendVisitModal from './ExtendVisitModal';
+import BadgeLookup from './BadgeLookup';
+import { useAuth } from '../context/AuthContext';
 import { getVisitStatus, getRemainingMs, formatRemaining, STATUS_STYLES, toDate } from '../lib/visitUtils';
+import { sendVisitEmail, sendHostEmail } from '../lib/email';
 
-const STATUS_FILTERS = ['All', 'Active', 'Expiring Soon', 'Expired', 'Checked Out'];
+const STATUS_FILTERS = ['All', 'Pre-Registered', 'Checked In', 'Expiring Soon', 'Expired', 'Checked Out'];
 
 const AdminVisitors = () => {
+  const { user } = useAuth();
   const [visitors, setVisitors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
@@ -20,6 +24,7 @@ const AdminVisitors = () => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [checkingOutId, setCheckingOutId] = useState(null);
   const [extendVisitor, setExtendVisitor] = useState(null);
+  const [showCheckoutLookup, setShowCheckoutLookup] = useState(false);
   const [actionError, setActionError] = useState('');
 
   useEffect(() => {
@@ -47,13 +52,24 @@ const AdminVisitors = () => {
   }, []);
 
   const handleCheckOut = async (visitorId) => {
+    const target = visitors.find((v) => v.id === visitorId);
     setCheckingOutId(visitorId);
     setActionError('');
     try {
       await updateDoc(doc(db, 'visitors', visitorId), {
         status: 'Checked Out',
         checkOutTime: serverTimestamp(),
+        checkOutBy: user?.uid || null,
       });
+      // Notify the host (and visitor) that checkout completed.
+      if (target) {
+        await Promise.allSettled([
+          sendVisitEmail({ ...target, status: 'Checked Out' }, { message: 'You have been checked out. Thank you for visiting.' }),
+          target.hostEmail
+            ? sendHostEmail({ ...target, status: 'Checked Out' }, { message: `${target.name || 'Your visitor'} has been checked out.` })
+            : Promise.resolve(false),
+        ]);
+      }
     } catch (err) {
       console.error('Check-out failed:', err);
       setActionError('Failed to check out the visitor. Please try again.');
@@ -75,7 +91,7 @@ const AdminVisitors = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const activeCount = visitors.filter((v) => getVisitStatus(v, now) === 'Active').length;
+  const activeCount = visitors.filter((v) => getVisitStatus(v, now) === 'Checked In').length;
   const expiringCount = visitors.filter((v) => getVisitStatus(v, now) === 'Expiring Soon').length;
   const expiredCount = visitors.filter((v) => getVisitStatus(v, now) === 'Expired').length;
 
@@ -90,6 +106,13 @@ const AdminVisitors = () => {
           visitor={extendVisitor}
           onClose={() => setExtendVisitor(null)}
           onExtended={() => setExtendVisitor(null)}
+        />
+      )}
+      {showCheckoutLookup && (
+        <BadgeLookup
+          mode="checkout"
+          onSelect={(visit) => { setShowCheckoutLookup(false); handleCheckOut(visit.id); }}
+          onClose={() => setShowCheckoutLookup(false)}
         />
       )}
 
@@ -154,6 +177,12 @@ const AdminVisitors = () => {
             />
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setShowCheckoutLookup(true)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              Checkout by badge
+            </button>
             {STATUS_FILTERS.map((status) => (
               <button
                 key={status}

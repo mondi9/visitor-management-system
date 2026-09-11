@@ -7,13 +7,13 @@ import { ROLES } from '../lib/roles';
 const LoadingScreen = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#0B192C]">
     <div className="flex flex-col items-center text-slate-400">
-      <Loader2 size={40} className="animate-spin mb-4 text-blue-400" />
+      <Loader2 size={40} className="animate-spin mb-4 text-teal-400" />
       <span className="font-medium">Checking session…</span>
     </div>
   </div>
 );
 
-const AccessDenied = ({ allowedLabels, role }) => (
+const AccessDenied = ({ role }) => (
   <div className="min-h-screen flex items-center justify-center bg-[#f4f7f6] p-6">
     <div className="bg-white rounded-2xl shadow-xl p-10 max-w-md text-center border border-slate-100">
       <div className="w-14 h-14 rounded-full bg-rose-50 flex items-center justify-center mx-auto mb-5">
@@ -21,7 +21,7 @@ const AccessDenied = ({ allowedLabels, role }) => (
       </div>
       <h1 className="text-xl font-bold text-slate-800 mb-2">Access Denied</h1>
       <p className="text-slate-500 text-sm mb-6">
-        Your role does not have permission to open this page. It is limited to {allowedLabels}. Ask a Super Admin to adjust your role in User Management.
+        The Host Portal is only for accounts with the Host role. Ask a Super Admin to assign it in User Management.
       </p>
       {role === ROLES.HOST ? (
         <Link
@@ -35,23 +35,20 @@ const AccessDenied = ({ allowedLabels, role }) => (
           to="/admin"
           className="inline-flex px-6 py-3 rounded-xl bg-[#0B192C] hover:bg-[#14294a] text-white text-sm font-semibold transition-colors"
         >
-          Back to Dashboard
+          Back to Admin Portal
         </Link>
       )}
     </div>
   </div>
 );
 
-const AdminRoute = ({ children, roles }) => {
+const HostRoute = ({ children }) => {
   const { user, role, loading } = useAuth();
 
   if (loading) return <LoadingScreen />;
   if (!user) return <AdminLogin />;
-  if (roles && !roles.includes(role)) {
-    const allowedLabels = roles.join(', ');
-    return <AccessDenied allowedLabels={allowedLabels} role={role} />;
-  }
+  if (role !== ROLES.HOST) return <AccessDenied role={role} />;
   return children;
 };
 
-export default AdminRoute;
+export default HostRoute;

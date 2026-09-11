@@ -40,7 +40,7 @@ const AdminReports = () => {
 
   const today = format(now, 'yyyy-MM-dd');
   const todayVisits = visitors.filter((v) => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === today);
-  const activeNow = visitors.filter((v) => getVisitStatus(v, now) === 'Active').length;
+  const activeNow = visitors.filter((v) => getVisitStatus(v, now) === 'Checked In').length;
   const checkedOut = visitors.filter((v) => v.status === 'Checked Out').length;
   const expired = visitors.filter((v) => getVisitStatus(v, now) === 'Expired').length;
 

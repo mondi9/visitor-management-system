@@ -57,7 +57,7 @@ const StayMonitor = () => {
       if (running.current) return;
       running.current = true;
       try {
-        const q = query(collection(db, 'visitors'), where('status', '==', 'Active'));
+        const q = query(collection(db, 'visitors'), where('status', '==', 'Checked In'));
         const snapshot = await getDocs(q);
         await Promise.allSettled(snapshot.docs.map(handleIndividual));
       } catch (err) {

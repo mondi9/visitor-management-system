@@ -44,7 +44,7 @@ const AdminDashboard = () => {
   }, []);
 
   const totalVisitors = visitors.length;
-  const activeNow = visitors.filter(v => v.status !== 'Checked Out').length;
+  const activeNow = visitors.filter(v => v.status !== 'Checked Out' && v.status !== 'Pre-Registered').length;
   const checkedInToday = visitors.filter(v => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd')).length;
   const checkedOutToday = visitors.filter(v => v.status === 'Checked Out' && v.checkOutTime && format(v.checkOutTime, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd')).length;
   const checkedInYesterday = visitors.filter((v) => v.checkInTime && format(v.checkInTime, 'yyyy-MM-dd') === format(new Date(now.getTime() - 86400000), 'yyyy-MM-dd')).length;

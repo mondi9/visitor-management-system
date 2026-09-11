@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Menu, Bell, Calendar, Clock } from 'lucide-react';
+import { Menu, Bell, Calendar, Clock, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
 import Sidebar from './Sidebar';
 
@@ -26,6 +26,13 @@ const AdminLayout = ({ title, subtitle, icon, children }) => {
             >
               <Menu size={24} />
             </button>
+            <Link
+              to="/"
+              className="mr-4 p-2 text-slate-500 hover:bg-slate-100 rounded-lg flex-shrink-0"
+              title="Back to Home"
+            >
+              <ArrowLeft size={24} />
+            </Link>
             <div className="min-w-0">
               <h1 className="text-xl font-bold text-[#0B192C] flex items-center gap-2 truncate">
                 {icon}

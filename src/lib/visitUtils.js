@@ -31,12 +31,13 @@ export const getRemainingMs = (expectedCheckoutTime, now = new Date()) => {
 };
 
 export const getVisitStatus = (visitor, now = new Date()) => {
+  if (visitor.status === 'Pre-Registered') return 'Pre-Registered';
   if (visitor.status === 'Checked Out' || visitor.checkOutTime) return 'Checked Out';
   const remaining = getRemainingMs(visitor.expectedCheckoutTime, now);
-  if (remaining === null) return 'Active';
+  if (remaining === null) return 'Checked In';
   if (remaining <= 0) return 'Expired';
   if (remaining <= EXPIRY_WARNING_MS) return 'Expiring Soon';
-  return 'Active';
+  return 'Checked In';
 };
 
 export const formatRemaining = (ms) => {
@@ -52,7 +53,8 @@ export const formatRemaining = (ms) => {
 };
 
 export const STATUS_STYLES = {
-  Active: 'bg-emerald-50 text-emerald-600',
+  'Pre-Registered': 'bg-blue-50 text-blue-600',
+  'Checked In': 'bg-emerald-50 text-emerald-600',
   'Expiring Soon': 'bg-amber-50 text-amber-600',
   Expired: 'bg-rose-50 text-rose-600',
   'Checked Out': 'bg-slate-100 text-slate-500',

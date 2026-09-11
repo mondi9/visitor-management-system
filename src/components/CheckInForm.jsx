@@ -1,14 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { User, Truck, Camera, CameraOff, RefreshCw, ScanFace, Check, ChevronRight, ChevronLeft, Loader2, Star, UserCheck, ClipboardList, Clock, CalendarClock } from 'lucide-react';
+import { collection, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { User, Truck, Camera, CameraOff, RefreshCw, ScanFace, Check, ChevronRight, ChevronLeft, Loader2, Star, UserCheck, ClipboardList, Clock, CalendarClock, BadgeCheck, Home } from 'lucide-react';
 import { format } from 'date-fns';
 import FrequentVisitorLookup from './FrequentVisitorLookup';
+import BadgeLookup from './BadgeLookup';
 import OnboardingGuide from './OnboardingGuide';
 import { DURATION_OPTIONS, DURATION_MINUTES, getExpectedCheckout } from '../lib/visitUtils';
-import { sendVisitEmail } from '../lib/email';
+import { getFaceEmbedding, verifyFace } from '../lib/faceVerification';
+import { generateBadgeNumber } from '../lib/badge';
+import { sendVisitEmail, sendHostEmail } from '../lib/email';
 import { getAppSettings, DEFAULT_DURATION } from '../lib/settings';
+import { useAuth } from '../context/AuthContext';
 
 const FIREBASE_TIMEOUT_MS = 15000;
 const FIREBASE_RETRIES = 2;
@@ -31,20 +35,18 @@ const withTimeout = (promise, ms = FIREBASE_TIMEOUT_MS) =>
     )
   ]);
 
-const generateBadgeNumber = () => {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const seq = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `VMS-${yyyy}${mm}${dd}-${seq}`;
-};
-
 const CheckInForm = ({ onCheckInSuccess }) => {
-  const [step, setStep] = useState(0); // 0: Home, 1: Details, 2: Visit, 3: Photo, 4: Confirm
+  const { user } = useAuth();
+  const [step, setStep] = useState(0); // 0: Home, 1: Details, 2: Visit, 3: Photo, 4: Verify, 5: Confirm
   const [visitorType, setVisitorType] = useState(null); // 'visitor' or 'delivery'
   const [showLookup, setShowLookup] = useState(false);
   const [frequentVisitorId, setFrequentVisitorId] = useState(null); // ID of linked frequent visitor profile
+  const [showBadgeLookup, setShowBadgeLookup] = useState(false);
+  const [preRegisteredVisit, setPreRegisteredVisit] = useState(null); // Retrieved pre-registered visit for badge check-in
+  // Host/admin registration flow (New Visitor button): staff fill in the
+  // details, no photo is captured, and Confirm emails the badge number.
+  // Reception check-in flows (badge / returning) still capture the photo.
+  const [isHostRegistration, setIsHostRegistration] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -79,11 +81,13 @@ const CheckInForm = ({ onCheckInSuccess }) => {
   }, []);
   
   // Camera state
-  const [photo, setPhoto] = useState(null);
-  const [cameraStatus, setCameraStatus] = useState('idle');
+  const [verificationStatus, setVerificationStatus] = useState('idle'); // idle, verifying, success, failed
+  const [verificationMessage, setVerificationMessage] = useState('');
   const [faceDetected, setFaceDetected] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [faceModelStatus, setFaceModelStatus] = useState('loading');
+  const [photo, setPhoto] = useState(null);
+  const [cameraStatus, setCameraStatus] = useState('idle');
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const detectCanvasRef = useRef(null);
@@ -260,6 +264,44 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     startCamera();
   };
 
+  const performVerification = async () => {
+    setVerificationStatus('verifying');
+    setVerificationMessage('Comparing your photo...');
+    try {
+      if (!preRegisteredVisit?.photoUrl || !photo) {
+        throw new Error('Reference photo or live photo missing.');
+      }
+      // Convert DataURLs to images for face-api
+      const imgRef = new Image();
+      imgRef.src = preRegisteredVisit.photoUrl;
+      await imgRef.decode();
+      
+      const imgLive = new Image();
+      imgLive.src = photo;
+      await imgLive.decode();
+
+      const descRef = await getFaceEmbedding(imgRef);
+      const descLive = await getFaceEmbedding(imgLive);
+
+      if (!descRef || !descLive) {
+        throw new Error('Could not detect face in one of the photos.');
+      }
+
+      const result = await verifyFace(descRef, descLive);
+      if (result.verified) {
+        setVerificationStatus('success');
+        setVerificationMessage('Identity verified!');
+      } else {
+        setVerificationStatus('failed');
+        setVerificationMessage('Identity could not be verified. Please try again.');
+      }
+    } catch (err) {
+      console.error(err);
+      setVerificationStatus('failed');
+      setVerificationMessage(err.message);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -289,6 +331,7 @@ const CheckInForm = ({ onCheckInSuccess }) => {
   const handleFrequentVisitorSelect = (profile) => {
     setShowLookup(false);
     setFrequentVisitorId(profile.id);
+    setIsHostRegistration(false);
     setVisitorType('visitor');
     setFormData(prev => ({
       ...prev,
@@ -307,14 +350,55 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     setStep(2);
   };
 
+  const handleBadgeSelect = (visit) => {    setShowBadgeLookup(false);
+    setPreRegisteredVisit(visit);
+    setFrequentVisitorId(null);
+    setIsHostRegistration(false);
+    setVisitorType('visitor');
+    setFormData((prev) => ({
+      ...prev,
+      name: visit.name || '',
+      company: visit.company || '',
+      phone: visit.phone || '',
+      email: visit.email || '',
+      idType: visit.idType || 'National ID',
+      idNumber: visit.idNumber || '',
+      hostName: visit.hostName || '',
+      hostEmail: visit.hostEmail || '',
+      purpose: visit.purpose || 'Business Meeting',
+      duration: visit.duration || '30 Minutes',
+    }));
+    // Skip personal/visit entry — go straight to facial capture/verify
+    setStep(3);
+  };
+
+  const goHome = () => {
+    stopCamera();
+    setPreRegisteredVisit(null);
+    setFrequentVisitorId(null);
+    setIsHostRegistration(false);
+    setVisitorType(null);
+    setPhoto(null);
+    setError('');
+    setEmailWarning('');
+    setStep(0);
+  };
+
   const sendConfirmationEmail = async (visitor) => {
-    try {
-      await sendVisitEmail(visitor, {
+    const results = await Promise.allSettled([
+      sendVisitEmail(visitor, {
         message: 'Your check-in is confirmed. Please present this badge at reception.',
-      });
-    } catch (err) {
-      console.error('Failed to send confirmation email:', err);
-      setEmailWarning('Check-in saved, but the confirmation email could not be sent.');
+      }),
+      visitor.hostEmail
+        ? sendHostEmail(visitor, {
+            message: `${visitor.name || 'A visitor'} has checked in. Badge number ${visitor.badgeNumber || ''}.`,
+          })
+        : Promise.resolve(true),
+    ]);
+    const emailOk = results.every((r) => r.status === 'fulfilled' && r.value === true);
+    if (!emailOk) {
+      console.warn('One or more notification emails failed to send.');
+      setEmailWarning('Check-in saved, but one or more notification emails could not be sent.');
     }
   };
 
@@ -337,58 +421,160 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     setError('');
     setEmailWarning('');
 
-    const badgeNumber = generateBadgeNumber();
     const checkInTime = new Date();
     const expectedCheckoutTime = getExpectedCheckout(formData.duration);
     const durationMinutes = DURATION_MINUTES[formData.duration] || 60;
     let savedVisitor = null;
 
     try {
-      const payload = {
-        ...formData,
-        type: visitorType,
-        photoUrl: photo || null,
-        badgeNumber,
-        checkInTime: serverTimestamp(),
-        expectedCheckoutTime,
-        duration: formData.duration,
-        durationMinutes,
-        status: 'Active',
-        frequentVisitorId: frequentVisitorId || null,
-      };
+      if (preRegisteredVisit) {
+        // Pre-registered badge check-in: activate the existing visit record.
+        const badgeNumber = preRegisteredVisit.badgeNumber || generateBadgeNumber();
+        const payload = {
+          photoUrl: photo || null,
+          checkInTime: serverTimestamp(),
+          checkInBy: user?.uid || null,
+          expectedCheckoutTime,
+          duration: formData.duration,
+          durationMinutes,
+          status: 'Checked In',
+          frequentVisitorId: frequentVisitorId || preRegisteredVisit.profileId || null,
+        };
 
-      let docRef = null;
-      for (let attempt = 0; attempt <= FIREBASE_RETRIES; attempt += 1) {
-        try {
-          docRef = await withTimeout(addDoc(collection(db, 'visitors'), payload));
-          break;
-        } catch (err) {
-          // Only retry on transient/network failures, never on permission denials.
-          const transient =
-            err?.code === 'unavailable' ||
-            err?.code === 'deadline-exceeded' ||
-            err?.code === 'network-request-failed' ||
-            err?.code === 'resource-exhausted' ||
-            /timed out/i.test(err?.message || '');
-          if (attempt === FIREBASE_RETRIES || !transient) {
-            throw err;
+        let updated = false;
+        for (let attempt = 0; attempt <= FIREBASE_RETRIES; attempt += 1) {
+          try {
+            await withTimeout(updateDoc(doc(db, 'visitors', preRegisteredVisit.id), payload));
+            updated = true;
+            break;
+          } catch (err) {
+            // Only retry on transient/network failures, never on permission denials.
+            const transient =
+              err?.code === 'unavailable' ||
+              err?.code === 'deadline-exceeded' ||
+              err?.code === 'network-request-failed' ||
+              err?.code === 'resource-exhausted' ||
+              /timed out/i.test(err?.message || '');
+            if (attempt === FIREBASE_RETRIES || !transient) {
+              throw err;
+            }
+            console.warn(`Badge check-in update attempt ${attempt + 1} failed, retrying…`, err);
           }
-          console.warn(`Check-in write attempt ${attempt + 1} failed, retrying…`, err);
         }
-      }
+        if (!updated) throw new Error('Failed to check in the pre-registered visit.');
 
-      savedVisitor = {
-        id: docRef.id,
-        badgeNumber,
-        ...formData,
-        type: visitorType,
-        photoUrl: photo,
-        checkInTime,
-        expectedCheckoutTime,
-        durationMinutes,
-      };
+        savedVisitor = {
+          id: preRegisteredVisit.id,
+          badgeNumber,
+          ...formData,
+          type: 'visitor',
+          photoUrl: photo,
+          checkInTime,
+          expectedCheckoutTime,
+          durationMinutes,
+        };
+      } else if (isHostRegistration && !frequentVisitorId) {
+        // Host/admin registration: create a Pre-Registered visit with a
+        // badge number and email it to the visitor. No photo is captured
+        // here — reception takes the photo at check-in via badge lookup.
+        const badgeNumber = generateBadgeNumber();
+        const payload = {
+          ...formData,
+          type: visitorType,
+          photoUrl: null,
+          badgeNumber,
+          expectedArrivalTime: serverTimestamp(),
+          expectedCheckoutTime,
+          duration: formData.duration,
+          durationMinutes,
+          status: 'Pre-Registered',
+          profileId: null,
+          frequentVisitorId: null,
+          registeredBy: user?.uid || null,
+          hostId: null,
+          registrationTime: serverTimestamp(),
+          registrationEmailSent: false,
+          createdAt: serverTimestamp(),
+        };
+
+        let docRef = null;
+        for (let attempt = 0; attempt <= FIREBASE_RETRIES; attempt += 1) {
+          try {
+            docRef = await withTimeout(addDoc(collection(db, 'visitors'), payload));
+            break;
+          } catch (err) {
+            const transient =
+              err?.code === 'unavailable' ||
+              err?.code === 'deadline-exceeded' ||
+              err?.code === 'network-request-failed' ||
+              err?.code === 'resource-exhausted' ||
+              /timed out/i.test(err?.message || '');
+            if (attempt === FIREBASE_RETRIES || !transient) {
+              throw err;
+            }
+            console.warn(`Registration write attempt ${attempt + 1} failed, retrying…`, err);
+          }
+        }
+
+        savedVisitor = {
+          id: docRef.id,
+          badgeNumber,
+          ...formData,
+          type: visitorType,
+          photoUrl: null,
+          checkInTime: null,
+          expectedCheckoutTime,
+          durationMinutes,
+          status: 'Pre-Registered',
+        };
+      } else {
+        const badgeNumber = generateBadgeNumber();
+        const payload = {
+          ...formData,
+          type: visitorType,
+          photoUrl: photo || null,
+          badgeNumber,
+          checkInTime: serverTimestamp(),
+          expectedCheckoutTime,
+          duration: formData.duration,
+          durationMinutes,
+          status: 'Checked In',
+          frequentVisitorId: frequentVisitorId || null,
+        };
+
+        let docRef = null;
+        for (let attempt = 0; attempt <= FIREBASE_RETRIES; attempt += 1) {
+          try {
+            docRef = await withTimeout(addDoc(collection(db, 'visitors'), payload));
+            break;
+          } catch (err) {
+            // Only retry on transient/network failures, never on permission denials.
+            const transient =
+              err?.code === 'unavailable' ||
+              err?.code === 'deadline-exceeded' ||
+              err?.code === 'network-request-failed' ||
+              err?.code === 'resource-exhausted' ||
+              /timed out/i.test(err?.message || '');
+            if (attempt === FIREBASE_RETRIES || !transient) {
+              throw err;
+            }
+            console.warn(`Check-in write attempt ${attempt + 1} failed, retrying…`, err);
+          }
+        }
+
+        savedVisitor = {
+          id: docRef.id,
+          badgeNumber,
+          ...formData,
+          type: visitorType,
+          photoUrl: photo,
+          checkInTime,
+          expectedCheckoutTime,
+          durationMinutes,
+        };
+      }
     } catch (err) {
-      console.error("Error adding document: ", err);
+      console.error("Error during check-in: ", err);
       const code = err?.code || '';
       setError(
         code === 'permission-denied'
@@ -406,29 +592,64 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     }
 
     if (savedVisitor) {
-      await sendConfirmationEmail(savedVisitor);
-      onCheckInSuccess({ ...savedVisitor, emailWarning });
+      if (savedVisitor.status === 'Pre-Registered') {
+        // Host/admin registration: email the badge number to the visitor
+        // (and the host when a host email was entered).
+        const results = await Promise.allSettled([
+          sendVisitEmail(savedVisitor, {
+            message: `Your visit has been pre-registered. Your badge number is ${savedVisitor.badgeNumber}. Please present it at reception when you arrive.`,
+          }),
+          savedVisitor.hostEmail
+            ? sendHostEmail(savedVisitor, {
+                message: `${savedVisitor.name || 'A visitor'} has been registered. Badge number ${savedVisitor.badgeNumber}.`,
+              })
+            : Promise.resolve(true),
+        ]);
+        const emailOk = results.every((r) => r.status === 'fulfilled' && r.value === true);
+        if (!emailOk) {
+          console.warn('One or more registration emails failed to send.');
+          setEmailWarning('Registration saved, but one or more notification emails could not be sent.');
+        }
+        try {
+          await updateDoc(doc(db, 'visitors', savedVisitor.id), { registrationEmailSent: emailOk });
+        } catch (err) {
+          console.warn('Could not record registrationEmailSent:', err);
+        }
+        onCheckInSuccess({ ...savedVisitor, emailWarning: emailOk ? emailWarning : 'Registration saved, but one or more notification emails could not be sent.' });
+      } else {
+        await sendConfirmationEmail(savedVisitor);
+        onCheckInSuccess({ ...savedVisitor, emailWarning });
+      }
     }
   };
 
   const renderStepper = () => {
-    const steps = [
-      { num: 1, label: 'Your Details' },
+    // Host/admin registration skips photo + verification, so the sidebar
+    // shows only: Visitor Details → Visit Details → Confirm & Send.
+    const fullSteps = [
+      { num: 1, label: 'Visitor Details' },
       { num: 2, label: 'Visit Details' },
       { num: 3, label: 'Photo Capture' },
-      { num: 4, label: 'Confirm & Print' }
+      { num: 4, label: 'Verify Identity' },
+      { num: 5, label: 'Confirm & Print' }
     ];
+    const hostSteps = [
+      { num: 1, label: 'Visitor Details' },
+      { num: 2, label: 'Visit Details' },
+      { num: 5, label: 'Confirm & Send' }
+    ];
+    const steps = isHostRegistration ? hostSteps : fullSteps;
 
     return (
       <div className="w-64 border-r border-slate-100 p-8 hidden md:block bg-slate-50/50">
         <div className="space-y-8">
-          {steps.map((s) => (
+          {steps.map((s, i) => (
             <div key={s.num} className="flex items-center space-x-4">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors ${
                 step === s.num ? 'bg-blue-600 text-white' : 
                 step > s.num ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-400'
               }`}>
-                {step > s.num ? <Check size={16} /> : s.num}
+                {step > s.num ? <Check size={16} /> : i + 1}
               </div>
               <span className={`font-semibold text-sm ${
                 step === s.num ? 'text-slate-900' : 'text-slate-500'
@@ -458,6 +679,14 @@ const CheckInForm = ({ onCheckInSuccess }) => {
           />
         )}
 
+        {/* Pre-Registered Badge Lookup Modal */}
+        {showBadgeLookup && (
+          <BadgeLookup
+            onSelect={handleBadgeSelect}
+            onClose={() => setShowBadgeLookup(false)}
+          />
+        )}
+
         <div className="z-10 text-center mb-12">
           <div className="flex justify-center mb-6">
             <div className="bg-white/10 p-4 rounded-2xl backdrop-blur-md border border-white/20">
@@ -468,22 +697,22 @@ const CheckInForm = ({ onCheckInSuccess }) => {
           <p className="text-xl text-blue-200">We're happy to see you</p>
         </div>
 
-        <div className="z-10 flex flex-col sm:flex-row items-center justify-center max-w-2xl w-full gap-5">
-          {/* New Visitor */}
+        <div className="z-10 flex flex-col sm:flex-row items-center justify-center max-w-4xl w-full gap-5">
+          {/* New Visitor — host/admin registration (creates badge + emails it) */}
           <button
-            onClick={() => { setVisitorType('visitor'); setFrequentVisitorId(null); setStep(1); }}
+            onClick={() => { setVisitorType('visitor'); setFrequentVisitorId(null); setPreRegisteredVisit(null); setIsHostRegistration(true); setShowBadgeLookup(false); setStep(1); }}
             className="flex-1 w-full bg-[#0a1526] border border-blue-500/30 hover:border-blue-400 hover:bg-[#0d1b33] transition-all p-10 rounded-3xl flex flex-col items-center justify-center gap-4 group shadow-2xl"
           >
             <div className="w-20 h-20 rounded-full border-2 border-blue-500/50 flex items-center justify-center group-hover:scale-110 transition-transform bg-[#0B192C]">
               <User size={36} className="text-white" />
             </div>
             <span className="text-2xl font-bold text-white mt-2">New Visitor</span>
-            <span className="text-blue-400 group-hover:text-blue-300 text-sm">First time here &rarr;</span>
+            <span className="text-blue-400 group-hover:text-blue-300 text-sm">Register & email badge &rarr;</span>
           </button>
 
           {/* Returning Visitor */}
           <button
-            onClick={() => setShowLookup(true)}
+            onClick={() => { setPreRegisteredVisit(null); setShowBadgeLookup(false); setShowLookup(true); }}
             className="flex-1 w-full bg-[#0a1526] border border-amber-500/30 hover:border-amber-400 hover:bg-[#0d1b33] transition-all p-10 rounded-3xl flex flex-col items-center justify-center gap-4 group shadow-2xl"
           >
             <div className="w-20 h-20 rounded-full border-2 border-amber-500/50 flex items-center justify-center group-hover:scale-110 transition-transform bg-[#0B192C]">
@@ -491,6 +720,18 @@ const CheckInForm = ({ onCheckInSuccess }) => {
             </div>
             <span className="text-2xl font-bold text-white mt-2">Returning Visitor</span>
             <span className="text-amber-400/80 group-hover:text-amber-300 text-sm">Fast check-in &rarr;</span>
+          </button>
+
+          {/* Pre-Registered (badge) Check-In */}
+          <button
+            onClick={() => { setShowLookup(false); setShowBadgeLookup(true); }}
+            className="flex-1 w-full bg-[#0a1526] border border-teal-500/30 hover:border-teal-400 hover:bg-[#0d1b33] transition-all p-10 rounded-3xl flex flex-col items-center justify-center gap-4 group shadow-2xl"
+          >
+            <div className="w-20 h-20 rounded-full border-2 border-teal-500/50 flex items-center justify-center group-hover:scale-110 transition-transform bg-[#0B192C]">
+              <BadgeCheck size={36} className="text-teal-300" />
+            </div>
+            <span className="text-2xl font-bold text-white mt-2">Have a Badge?</span>
+            <span className="text-teal-400 group-hover:text-teal-300 text-sm">Pre-registered check-in &rarr;</span>
           </button>
         </div>
 
@@ -513,24 +754,29 @@ const CheckInForm = ({ onCheckInSuccess }) => {
         <div className="flex-1 p-8 md:p-12">
           {/* Header */}
           <div className="flex items-center mb-8">
-            <button onClick={() => setStep(step === 1 ? 0 : step - 1)} className="mr-4 text-slate-400 hover:text-slate-600 transition-colors">
+            <button onClick={() => setStep(step === 1 ? 0 : (step === 5 && isHostRegistration ? 2 : step - 1))} className="mr-4 text-slate-400 hover:text-slate-600 transition-colors">
               <ChevronLeft size={24} />
             </button>
             <div>
               <h2 className="text-2xl font-bold text-slate-800">
-                {step === 1 && "Visitor Self Check-In"}
+                {step === 1 && "Visitor Details"}
                 {step === 2 && "Visit Details"}
                 {step === 3 && "Photo Capture"}
-                {step === 4 && "Confirm Your Visit"}
+                {step === 4 && "Verify Identity"}
+                {step === 5 && (isHostRegistration ? "Confirm & Send Badge" : "Confirm Your Visit")}
               </h2>
               <p className="text-slate-500 mt-1">
-                {step === 1 && "Please fill in your details"}
-                {step === 2 && "Who are you here to see?"}
+                {step === 1 && "Enter the visitor's details"}
+                {step === 2 && "Who are they here to see?"}
                 {step === 3 && "Please look at the camera"}
-                {step === 4 && "Please confirm your details"}
-              </p>
+                {step === 4 && "Facial verification"}
+                {step === 5 && (isHostRegistration ? "Confirm to create the badge and email it to the visitor" : "Please confirm your details")}
+                </p>
+              </div>
+              <button onClick={goHome} className="ml-auto flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors flex-shrink-0">
+                <Home size={16} /> Home
+              </button>
             </div>
-          </div>
 
           {error && (
             <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-r">
@@ -648,8 +894,14 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                       return;
                     }
                     setError('');
-                    setStep(3);
-                    startCamera();
+                    if (isHostRegistration && !preRegisteredVisit && !frequentVisitorId) {
+                      // Host/admin registration: no photo capture — go
+                      // straight to Confirm & Send Badge.
+                      setStep(5);
+                    } else {
+                      setStep(3);
+                      startCamera();
+                    }
                   }}
                   className="bg-[#0B192C] hover:bg-[#14294a] text-white px-8 py-3 rounded-lg font-semibold flex items-center transition-colors"
                 >
@@ -766,7 +1018,7 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                     <button onClick={retakePhoto} className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 py-3.5 rounded-xl font-semibold transition-colors">
                       Retake
                     </button>
-                    <button onClick={() => setStep(4)} className="flex-1 bg-[#0B192C] hover:bg-[#14294a] text-white py-3.5 rounded-xl font-semibold transition-colors">
+                    <button onClick={() => setStep(preRegisteredVisit?.photoUrl ? 4 : 5)} className="flex-1 bg-[#0B192C] hover:bg-[#14294a] text-white py-3.5 rounded-xl font-semibold transition-colors">
                       Next &rarr;
                     </button>
                   </>
@@ -781,8 +1033,64 @@ const CheckInForm = ({ onCheckInSuccess }) => {
             </div>
           )}
 
-          {/* Step 4: Confirm */}
+          {/* Step 4: Verify Identity (only when a reference photo exists;
+              badge visits are created without a photo — photo is taken
+              at reception — so this step is skipped) */}
           {step === 4 && (
+            preRegisteredVisit && !preRegisteredVisit.photoUrl ? (
+              <div className="animate-in fade-in slide-in-from-right-4 duration-500 flex flex-col items-center">
+                <div className="mb-6 p-4 rounded-xl border border-slate-200 bg-slate-50 w-full">
+                  <p className="font-semibold text-slate-800 text-center">No reference photo on file — verification skipped. The reception photo will be kept on record.</p>
+                </div>
+                <button
+                  onClick={() => setStep(5)}
+                  className="bg-[#0B192C] hover:bg-[#14294a] text-white px-8 py-3 rounded-lg font-semibold"
+                >
+                  Continue to Confirm
+                </button>
+              </div>
+            ) : (
+            <div className="animate-in fade-in slide-in-from-right-4 duration-500 flex flex-col items-center">
+              <div className="mb-6 p-4 rounded-xl border border-slate-200 bg-slate-50 w-full">
+                <p className="font-semibold text-slate-800 text-center">{verificationMessage}</p>
+              </div>
+              
+              {verificationStatus === 'idle' && (
+                <button 
+                  onClick={performVerification}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold"
+                >
+                  Start Verification
+                </button>
+              )}
+              
+              {verificationStatus === 'verifying' && (
+                <Loader2 size={32} className="animate-spin text-blue-600" />
+              )}
+              
+              {verificationStatus === 'success' && (
+                <button 
+                  onClick={() => setStep(5)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-lg font-semibold"
+                >
+                  Verification Successful — Continue
+                </button>
+              )}
+
+              {verificationStatus === 'failed' && (
+                <button 
+                  onClick={() => setStep(3)}
+                  className="bg-rose-600 hover:bg-rose-700 text-white px-8 py-3 rounded-lg font-semibold"
+                >
+                  Verification Failed — Retake Photo
+                </button>
+              )}
+            </div>
+            )
+          )}
+
+          {/* Step 5: Confirm */}
+          {step === 5 && (
             <div className="animate-in fade-in slide-in-from-right-4 duration-500">
               <div className="bg-slate-50 border border-slate-100 rounded-xl p-6 mb-8 space-y-4">
                 <div className="grid grid-cols-[120px_1fr] items-start">
@@ -807,7 +1115,9 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                 </div>
                 <div className="grid grid-cols-[120px_1fr] items-start">
                   <span className="text-slate-500 font-medium text-sm flex items-center"><CalendarClock size={16} className="mr-2"/> Expected Checkout</span>
-                  <span className="font-semibold text-slate-800">{format(getExpectedCheckout(formData.duration), 'MMM d, h:mm a')}</span>
+                  <span className="font-semibold text-slate-800">
+                    {formData.duration ? format(getExpectedCheckout(formData.duration), 'MMM d, h:mm a') : '—'}
+                  </span>
                 </div>
               </div>
 
@@ -820,7 +1130,9 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                   className="mt-1 w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
                 />
                 <span className="text-slate-600 text-sm">
-                  I agree to the <a href="#" className="text-blue-600 hover:underline">terms and conditions</a> and understand that my photo and details will be securely stored for security purposes.
+                  {isHostRegistration
+                    ? "I confirm these visitor details are correct and the badge number may be emailed to the visitor."
+                    : "I agree to the terms and conditions and understand that my photo and details will be securely stored for security purposes."}
                 </span>
               </label>
 
@@ -830,11 +1142,10 @@ const CheckInForm = ({ onCheckInSuccess }) => {
                 className="w-full bg-[#0B192C] hover:bg-[#14294a] text-white py-4 rounded-xl font-bold flex items-center justify-center transition-all disabled:opacity-50 shadow-lg"
               >
                 {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : null}
-                {loading ? 'Processing...' : 'Confirm & Print Badge'}
+                {loading ? 'Processing...' : (isHostRegistration ? 'Confirm & Send Badge' : 'Confirm & Print Badge')}
               </button>
             </div>
           )}
-
         </div>
       </div>
     </div>

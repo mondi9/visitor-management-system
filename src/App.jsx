@@ -16,6 +16,9 @@ import AdminReports from './components/AdminReports';
 import AdminSettings from './components/AdminSettings';
 import AdminUsers from './components/AdminUsers';
 import AdminNotifications from './components/AdminNotifications';
+import HostRoute from './components/HostRoute';
+import HostDashboard from './components/HostDashboard';
+import HostRegisterVisitor from './components/HostRegisterVisitor';
 import { AuthProvider } from './context/AuthContext';
 import { ROLES } from './lib/roles';
 
@@ -49,8 +52,9 @@ function App() {
         <div className="min-h-screen font-sans bg-[var(--bg-primary)] text-[var(--text-primary)]">
           <StayMonitor />
           <Routes>
-            {/* Public kiosk */}
-            <Route path="/" element={<CheckInFlow />} />
+            {/* Staff check-in (no public kiosk): Reception / Security /
+                Super Admin must sign in before the visitor check-in screen. */}
+            <Route path="/" element={<AdminRoute roles={allRoles}><CheckInFlow /></AdminRoute>} />
 
             {/* Admin portal */}
             <Route path="/admin" element={<AdminRoute roles={allRoles}><AdminDashboard /></AdminRoute>} />
@@ -68,11 +72,16 @@ function App() {
             {/* Public password-recovery page reached from the reset email link */}
             <Route path="/admin/reset-password" element={<ResetPassword />} />
 
+            {/* Host portal (host-driven registration) */}
+            <Route path="/host" element={<HostRoute><HostDashboard /></HostRoute>} />
+            <Route path="/host/register" element={<HostRoute><HostRegisterVisitor /></HostRoute>} />
+            <Route path="/host/*" element={<HostRoute><HostDashboard /></HostRoute>} />
+
             {/* Fallback: unknown admin route */}
             <Route path="/admin/*" element={<AdminRoute roles={allRoles}><AdminDashboard /></AdminRoute>} />
 
-            {/* Fallback: unknown public route */}
-            <Route path="*" element={<CheckInFlow />} />
+            {/* Fallback: unknown public route -> staff check-in (login-gated) */}
+            <Route path="*" element={<AdminRoute roles={allRoles}><CheckInFlow /></AdminRoute>} />
           </Routes>
         </div>
       </AuthProvider>

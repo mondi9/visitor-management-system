@@ -82,7 +82,7 @@ const DigitalBadge = ({ visitor, onBack }) => {
             </div>
           </div>
           <h2 className="text-3xl font-extrabold tracking-tight">Visitor Badge</h2>
-          <p className="text-emerald-50 mt-2 font-medium">Successfully Checked In</p>
+          <p className="text-emerald-50 mt-2 font-medium">{visitor.status === 'Pre-Registered' ? 'Badge created — number emailed to visitor' : 'Successfully Checked In'}</p>
         </div>
       </div>
 
@@ -151,7 +151,7 @@ const DigitalBadge = ({ visitor, onBack }) => {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Arrival Time</p>
                   <p className="font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {format(visitor.checkInTime, 'MMM d, h:mm a')}
+                    {visitor.checkInTime ? format(visitor.checkInTime, 'MMM d, h:mm a') : 'Not checked in yet'}
                   </p>
                 </div>
               </div>

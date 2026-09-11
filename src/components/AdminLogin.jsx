@@ -64,10 +64,19 @@ const AdminLogin = () => {
       setResetMessage('If an account exists for that email, a reset link has been sent. Open it to set a new password.');
     } catch (err) {
       console.error('Password reset error:', err);
+      const code = err?.code || '';
       setError(
-        err?.code === 'auth/user-not-found'
+        code === 'auth/user-not-found'
           ? 'No account is registered with that email.'
-          : 'Could not send a reset link. Please try again.'
+          : code === 'auth/network-request-failed'
+            ? 'Network error. Check your connection and try again.'
+            : code === 'auth/unauthorized-domain'
+              ? 'This domain is not authorized for Firebase Authentication. Add it in Firebase Console → Authentication → Settings → Authorized domains.'
+              : code === 'auth/operation-not-allowed'
+                ? 'Password reset is not enabled for this provider. Enable it in Firebase Console → Authentication → Sign-in method.'
+              : code === 'auth/too-many-requests'
+                ? 'Too many attempts. Wait a moment and try again.'
+                : 'Could not send a reset link. Please try again.'
       );
     } finally {
       setLoading(false);
@@ -236,7 +245,7 @@ const AdminLogin = () => {
 
         <div className="mt-6 flex justify-center">
           <Link to="/" className="text-blue-400/70 hover:text-blue-300 text-sm font-medium flex items-center gap-1.5 transition-colors">
-            <ArrowLeft size={16} /> Back to check-in kiosk
+            <ArrowLeft size={16} /> Back to sign in
           </Link>
         </div>
       </div>

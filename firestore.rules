@@ -3,33 +3,190 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ----- Kiosk (public, unauthenticated) -----
-    // The check-in kiosk runs without a login, so public access is required
-    // to create visitor records and read frequent-visitor profiles.
+    // ---------- Helper functions ----------
+    // NOTE: these live INSIDE match /databases/{database}/documents so the
+    // $(database) binding resolves correctly.
 
-    match /visitors/{id} {
-      // The kiosk creates check-in records without a login.
-      allow create: if true;
-      // Only staff may read or modify records (check-out, extend, reports,
-      // stay monitor). The kiosk never reads this collection.
-      allow read, update, delete: if isStaff();
+    function isSignedIn() {
+      return request.auth != null;
     }
 
+    function getRole(uid) {
+      // Role is stored on the users/{uid} document.
+      return get(/databases/$(database)/documents/users/$(uid)).data.role;
+    }
+
+    function isStaff() {
+      return isSignedIn() && getRole(request.auth.uid) in
+        ['super-admin', 'receptionist', 'security-officer'];
+    }
+
+    function isHost() {
+      return isSignedIn() && getRole(request.auth.uid) == 'host';
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && getRole(request.auth.uid) == 'super-admin';
+    }
+
+    // Visit lifecycle: Pre-Registered -> Checked In -> Checked Out.
+    // A visit may keep the same status or move forward only.
+    function isValidStatusTransition(before, after) {
+      return before == after
+        || (before == 'Pre-Registered' && after == 'Checked In')
+        || (before == 'Checked In' && after == 'Checked Out')
+        || (before == 'Pre-Registered' && after == 'Checked Out');
+    }
+
+    // The only fields staff may change when checking a visitor in/out,
+    // extending a visit, running the stay monitor, or recording identity and
+    // facial verification results.
+    function isVisitUpdateAllowed(before, after) {
+      return isValidStatusTransition(before.status, after.status)
+        && after.diff(before).affectedKeys().hasOnly([
+          'status',
+          'checkInTime',
+          'checkInBy',
+          'expectedCheckoutTime',
+          'duration',
+          'durationMinutes',
+          'photoUrl',
+          'frequentVisitorId',
+          'checkOutTime',
+          'checkOutBy',
+          'reminderSent',
+          'reminderSentAt',
+          'expiredEmailSent',
+          'expiredEmailSentAt',
+          'extendCount',
+          'lastExtendedAt',
+          'verificationStatus',
+          'verificationMethod',
+          'verifiedAt',
+          'verifiedBy',
+          'facialVerificationStatus',
+          'facialVerificationAt',
+        ]);
+    }
+
+    // A Host may only set registrationEmailSent on their own Pre-Registered
+    // visit. They cannot touch any other field or progress the status.
+    function isHostRegistrationUpdateAllowed(before, after) {
+      return before.registeredBy == request.auth.uid
+        && before.status == 'Pre-Registered'
+        && after.status == 'Pre-Registered'
+        && after.diff(before).affectedKeys().hasOnly(['registrationEmailSent']);
+    }
+
+    // A Host may extend the end time of a visit they registered once it is
+    // checked in (the derived Expired state keeps db status 'Checked In').
+    // Status never changes here and only extension-related fields may move.
+    function isHostExtendAllowed(before, after) {
+      return before.registeredBy == request.auth.uid
+        && before.status == 'Checked In'
+        && after.status == 'Checked In'
+        && after.diff(before).affectedKeys().hasOnly([
+          'expectedCheckoutTime',
+          'reminderSent',
+          'reminderSentAt',
+          'expiredEmailSent',
+          'expiredEmailSentAt',
+          'extendCount',
+          'lastExtendedAt',
+        ]);
+    }
+
+    // Badge-first flow: the Host (or Admin) creates the badge up front. The
+    // visit is stored as Pre-Registered with a host-issued badgeNumber, the
+    // visitor is notified by email, and at arrival they only complete facial
+    // capture at reception — the badge number is already theirs.
+    // A Host may therefore register a new visitor only as a Pre-Registered
+    // visit tied to their own account, carrying a non-empty badgeNumber and
+    // no facial/verification data (captured later by staff at reception).
+    function isHostRegistrationCreateAllowed(newData) {
+      return newData.status == 'Pre-Registered'
+        && newData.type == 'visitor'
+        && newData.registeredBy == request.auth.uid
+        && newData.badgeNumber is string
+        && newData.badgeNumber.size() > 0
+        && newData.keys().hasAll([
+          'badgeNumber',
+          'profileId',
+          'expectedCheckoutTime',
+          'registeredBy',
+          'status',
+          'type',
+        ])
+        && (!('photoUrl' in newData) || newData.photoUrl == null)
+        && (!('facialVerificationStatus' in newData) || newData.facialVerificationStatus == null)
+        && (!('verificationStatus' in newData) || newData.verificationStatus == null);
+    }
+
+    // A Host may create a new frequent-visitor profile only when it is tagged
+    // as host-created and carries no facial data (photos are captured by staff).
+    function isHostProfileCreateAllowed(newData) {
+      return newData.createdBy == 'host'
+        && (!('photoUrl' in newData) || newData.photoUrl == null);
+    }
+
+    // ----- Visitor visits (least-privilege) -----
+    // Badge-first flow:
+    //   1. Host/Admin creates the badge -> Pre-Registered visit with a
+    //      host-issued badgeNumber; visitor + host are notified by email.
+    //   2. Visitor arrives and presents the badge number; reception looks the
+    //      visit up by badge and captures the facial photo on the staff device.
+    //   3. Staff flips the visit Pre-Registered -> Checked In with the
+    //      facial capture attached (photoUrl / facialVerification* fields).
+    // There is NO public/unauthenticated access to the visitors ledger: the
+    // visitor never touches Firestore directly — every write is performed by
+    // a signed-in Host (step 1) or signed-in staff (steps 2-3) on their device.
+    // Badge numbers, personal information and facial capture data (photoUrl)
+    // are exposed only to authenticated staff (Reception / Security / Admin)
+    // or to a Host for the visits they themselves registered. Knowing a badge
+    // number grants nothing: the visitor database is never publicly readable.
+    // The visit lifecycle is Pre-Registered -> Checked In -> Checked Out.
+    match /visitors/{id} {
+      // Staff record walk-in check-ins; a Host may pre-register a visitor
+      // under their own account (Pre-Registered WITH badge, no facial data).
+      allow create: if isStaff()
+        || (isHost() && isHostRegistrationCreateAllowed(request.resource.data));
+      // Staff see every visit (badge lookup at reception); a Host sees only
+      // the visits they registered.
+      allow read: if isStaff()
+        || (isHost() && resource.data.registeredBy == request.auth.uid);
+      // Staff may progress a visit (reception face-capture check-in, extend,
+      // reminders, check-out, verification) but only within the allowed
+      // lifecycle and field set. A Host may only mark their pre-registration
+      // email as sent, or extend the end time of their own checked-in visit.
+      allow update: if (isStaff() && isVisitUpdateAllowed(resource.data, request.resource.data))
+        || (isHost() && isHostRegistrationUpdateAllowed(resource.data, request.resource.data))
+        || (isHost() && isHostExtendAllowed(resource.data, request.resource.data));
+      // Audit integrity: visit records are never deleted by day-to-day staff.
+      allow delete: if isSuperAdmin();
+    }
+
+    // ----- Frequent-visitor profiles -----
+    // Staff manage the profile directory (which contains facial/profile data).
+    // A Host may read profiles to reuse an existing one and may create a new
+    // host-owned profile (never with facial data). Unauthenticated visitors
+    // cannot read or write profiles.
     match /frequentVisitors/{id} {
-      // Kiosk returning-visitor lookup (read) and "Save as Frequent Visitor" (create).
-      allow read, create: if true;
+      allow read: if isStaff() || isHost();
+      allow create: if isStaff()
+        || (isHost() && isHostProfileCreateAllowed(request.resource.data));
       allow update, delete: if isStaff();
     }
 
+    // ----- Staff-only directories -----
     match /deliveries/{id} {
-      // The kiosk's "delivery" type is logged to the visitors collection, so
-      // the deliveries ledger is staff-managed only.
       allow read, create, update, delete: if isStaff();
     }
 
-    // ----- Staff-only directories -----
     match /hosts/{id} {
-      allow read, write: if isStaff();
+      // Staff manage the directory. A Host can read only their own linked
+      // directory record (matched by userId == their auth uid).
+      allow read: if isStaff() || (isHost() && resource.data.userId == request.auth.uid);
+      allow create, update, delete: if isStaff();
     }
 
     match /contractors/{id} {
@@ -41,8 +198,8 @@ service cloud.firestore {
     }
 
     // ----- App settings (Super Admin writes; readable by all) -----
-    // The unauthenticated kiosk reads the default visit duration and the
-    // organization name for badges, so reads are public.
+    // Publicly readable so the check-in UI can show the organization name and
+    // default visit duration. Contains only non-sensitive configuration.
     match /appSettings/{id} {
       allow read: if true;
       allow write: if isSuperAdmin();
@@ -61,24 +218,5 @@ service cloud.firestore {
         && request.resource.data.role == 'receptionist';
       allow update, delete: if isSuperAdmin();
     }
-  }
-
-  // ---------- Helper functions ----------
-  function isSignedIn() {
-    return request.auth != null;
-  }
-
-  function getRole(uid) {
-    // Role is stored on the users/{uid} document.
-    return get(/databases/$(database)/documents/users/$(uid)).data.role;
-  }
-
-  function isStaff() {
-    return isSignedIn() && getRole(request.auth.uid) in
-      ['super-admin', 'receptionist', 'security-officer'];
-  }
-
-  function isSuperAdmin() {
-    return isSignedIn() && getRole(request.auth.uid) == 'super-admin';
   }
 }
