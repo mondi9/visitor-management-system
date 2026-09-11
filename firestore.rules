@@ -58,6 +58,7 @@ service cloud.firestore {
           'reminderSentAt',
           'expiredEmailSent',
           'expiredEmailSentAt',
+          'registrationEmailSent',
           'extendCount',
           'lastExtendedAt',
           'verificationStatus',
