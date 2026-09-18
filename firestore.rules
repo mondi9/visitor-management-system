@@ -11,22 +11,40 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userDoc(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function roleExists(uid) {
+      return exists(userDoc(uid));
+    }
+
     function getRole(uid) {
       // Role is stored on the users/{uid} document.
-      return get(/databases/$(database)/documents/users/$(uid)).data.role;
+      // exists() guard: get() on a missing doc throws and denies the
+      // request, which deadlocks bootstrap (new user has no role doc yet).
+      return roleExists(uid) ? get(userDoc(uid)).data.role : '';
     }
 
     function isStaff() {
-      return isSignedIn() && getRole(request.auth.uid) in
+      return isSignedIn() && roleExists(request.auth.uid) && getRole(request.auth.uid) in
         ['super-admin', 'receptionist', 'security-officer'];
     }
 
     function isHost() {
-      return isSignedIn() && getRole(request.auth.uid) == 'host';
+      return isSignedIn() && roleExists(request.auth.uid) && getRole(request.auth.uid) == 'host';
     }
 
     function isSuperAdmin() {
-      return isSignedIn() && getRole(request.auth.uid) == 'super-admin';
+      return isSignedIn() && roleExists(request.auth.uid) && getRole(request.auth.uid) == 'super-admin';
+    }
+
+    // Base64 facial captures are large. Keep every photoUrl under ~950KB
+    // so a single write can never exceed the 1MiB document limit.
+    function isPhotoAllowed(newData) {
+      return !('photoUrl' in newData)
+        || newData.photoUrl == null
+        || (newData.photoUrl is string && newData.photoUrl.size() < 950000);
     }
 
     // Visit lifecycle: Pre-Registered -> Checked In -> Checked Out.
@@ -123,34 +141,171 @@ service cloud.firestore {
         && (!('verificationStatus' in newData) || newData.verificationStatus == null);
     }
 
-    // A Host may create a new frequent-visitor profile only when it is tagged
-    // as host-created and carries no facial data (photos are captured by staff).
+    // A Host may create a new frequent-visitor profile tagged as
+    // host-created. Photos ARE allowed (DigitalBadge "Save as Frequent
+    // Visitor" sends the kiosk capture) but capped so the doc stays small.
+    // createdBy is optional for backwards compatibility with clients that
+    // omit it (e.g. DigitalBadge.jsx); when present it must be host/kiosk.
     function isHostProfileCreateAllowed(newData) {
-      return newData.createdBy == 'host'
-        && (!('photoUrl' in newData) || newData.photoUrl == null);
+      return newData.keys().hasAll(['name', 'phone'])
+        && (!('createdBy' in newData) || newData.createdBy in ['host', 'kiosk'])
+        && isPhotoAllowed(newData);
     }
 
-    // ----- Visitor visits (least-privilege) -----
+    function isFrequentCounterUpdateAllowed(before, after) {
+      // Hosts/kiosk may bump counters on reuse, nothing else.
+      return after.diff(before).affectedKeys().hasOnly(['visitCount', 'lastVisit'])
+        && (!('visitCount' in after) || !('visitCount' in before)
+          || after.visitCount is int && before.visitCount is int
+          && after.visitCount >= before.visitCount);
+    }
+
+    // ----- Kiosk self-service (unauthenticated Confirm & Send) -----
+    // CheckInForm runs on a logged-out kiosk and sends registeredBy/checkInBy
+    // as null (user?.uid || null). Without this branch every kiosk write is
+    // permission-denied by design. This opens ONLY narrowly-validated
+    // creates/updates: no public read, no delete, no privilege fields.
+    function isKioskVisitorCreateAllowed(newData) {
+      return newData.status in ['Checked In', 'Pre-Registered']
+        && newData.type == 'visitor'
+        && newData.badgeNumber is string
+        && newData.badgeNumber.size() > 0
+        && newData.name is string
+        && newData.name.size() > 0
+        && newData.phone is string
+        && newData.phone.size() > 0
+        && newData.email is string
+        && newData.email.size() > 0
+        && newData.hostName is string
+        && newData.hostName.size() > 0
+        && newData.keys().hasAll([
+          'badgeNumber',
+          'name',
+          'phone',
+          'email',
+          'hostName',
+          'expectedCheckoutTime',
+          'status',
+          'type',
+        ])
+        && newData.keys().hasOnly([
+          'name',
+          'company',
+          'phone',
+          'email',
+          'idType',
+          'idNumber',
+          'hostName',
+          'hostEmail',
+          'purpose',
+          'duration',
+          'durationMinutes',
+          'agreed',
+          'type',
+          'photoUrl',
+          'badgeNumber',
+          'checkInTime',
+          'checkInBy',
+          'expectedArrivalTime',
+          'expectedCheckoutTime',
+          'status',
+          'profileId',
+          'frequentVisitorId',
+          'registeredBy',
+          'hostId',
+          'registrationTime',
+          'registrationEmailSent',
+          'createdAt',
+        ])
+        // Kiosk cannot spoof ownership (null when logged out, own uid when
+        // signed in) or verification state.
+        && (newData.status != 'Pre-Registered' || !('photoUrl' in newData) || newData.photoUrl == null)
+        && (!('registeredBy' in newData) || newData.registeredBy == null
+          || (request.auth != null && newData.registeredBy == request.auth.uid))
+        && (!('checkInBy' in newData) || newData.checkInBy == null
+          || (request.auth != null && newData.checkInBy == request.auth.uid))
+        && (!('hostId' in newData) || newData.hostId == null)
+        && (!('facialVerificationStatus' in newData) || newData.facialVerificationStatus == null)
+        && (!('verificationStatus' in newData) || newData.verificationStatus == null)
+        && isPhotoAllowed(newData);
+    }
+
+    // Badge check-in from the logged-out kiosk:
+    // Pre-Registered -> Checked In + facial capture only.
+    function isKioskVisitCheckInAllowed(before, after) {
+      return before.status == 'Pre-Registered'
+        && after.status == 'Checked In'
+        && after.diff(before).affectedKeys().hasOnly([
+          'status',
+          'photoUrl',
+          'checkInTime',
+          'checkInBy',
+          'expectedCheckoutTime',
+          'duration',
+          'durationMinutes',
+          'frequentVisitorId',
+        ])
+        && (!('checkInBy' in after) || after.checkInBy == null
+          || (request.auth != null && after.checkInBy == request.auth.uid))
+        && isPhotoAllowed(after);
+    }
+
+    // After the kiosk sends confirmation emails it flips only this flag.
+    function isKioskRegistrationFlagAllowed(before, after) {
+      return before.status == 'Pre-Registered'
+        && after.status == 'Pre-Registered'
+        && after.diff(before).affectedKeys().hasOnly(['registrationEmailSent']);
+    }
+
+    // "Save as Frequent Visitor" button on the logged-out badge screen.
+    function isKioskProfileCreateAllowed(newData) {
+      return newData.name is string
+        && newData.name.size() > 0
+        && newData.phone is string
+        && newData.phone.size() > 0
+        && newData.keys().hasAll(['name', 'phone'])
+        && newData.keys().hasOnly([
+          'name',
+          'nameLower',
+          'company',
+          'phone',
+          'email',
+          'idType',
+          'idNumber',
+          'photoUrl',
+          'defaultHostName',
+          'defaultHostEmail',
+          'defaultPurpose',
+          'defaultDuration',
+          'visitCount',
+          'lastVisit',
+          'createdAt',
+          'createdBy',
+        ])
+        && (!('createdBy' in newData) || newData.createdBy in ['host', 'kiosk'])
+        && (!('visitCount' in newData) || newData.visitCount is int)
+        && isPhotoAllowed(newData);
+    }
+
+    // ----- Visitor visits (least-privilege + kiosk self-service) -----
     // Badge-first flow:
     //   1. Host/Admin creates the badge -> Pre-Registered visit with a
     //      host-issued badgeNumber; visitor + host are notified by email.
     //   2. Visitor arrives and presents the badge number; reception looks the
-    //      visit up by badge and captures the facial photo on the staff device.
+    //      visit up by badge and captures the facial photo on the staff device,
+    //      OR the logged-out kiosk captures it via the narrow kiosk branch.
     //   3. Staff flips the visit Pre-Registered -> Checked In with the
     //      facial capture attached (photoUrl / facialVerification* fields).
-    // There is NO public/unauthenticated access to the visitors ledger: the
-    // visitor never touches Firestore directly — every write is performed by
-    // a signed-in Host (step 1) or signed-in staff (steps 2-3) on their device.
-    // Badge numbers, personal information and facial capture data (photoUrl)
-    // are exposed only to authenticated staff (Reception / Security / Admin)
-    // or to a Host for the visits they themselves registered. Knowing a badge
-    // number grants nothing: the visitor database is never publicly readable.
+    // Reads stay authenticated-only: knowing a badge number grants nothing.
+    // Writes allow: staff (anything valid), host (own pre-registrations),
+    // kiosk/anon (strictly-validated self check-in only, no read/delete).
     // The visit lifecycle is Pre-Registered -> Checked In -> Checked Out.
     match /visitors/{id} {
-      // Staff record walk-in check-ins; a Host may pre-register a visitor
-      // under their own account (Pre-Registered WITH badge, no facial data).
+      // Staff record walk-ins; hosts pre-register under their own account;
+      // logged-out kiosk self check-in (Confirm & Send) via strict shape.
       allow create: if isStaff()
-        || (isHost() && isHostRegistrationCreateAllowed(request.resource.data));
+        || (isHost() && isHostRegistrationCreateAllowed(request.resource.data))
+        || isKioskVisitorCreateAllowed(request.resource.data);
       // Staff see every visit (badge lookup at reception); a Host sees only
       // the visits they registered.
       allow read: if isStaff()
@@ -159,23 +314,29 @@ service cloud.firestore {
       // reminders, check-out, verification) but only within the allowed
       // lifecycle and field set. A Host may only mark their pre-registration
       // email as sent, or extend the end time of their own checked-in visit.
+      // The logged-out kiosk may complete badge check-in + email-sent flag.
       allow update: if (isStaff() && isVisitUpdateAllowed(resource.data, request.resource.data))
         || (isHost() && isHostRegistrationUpdateAllowed(resource.data, request.resource.data))
-        || (isHost() && isHostExtendAllowed(resource.data, request.resource.data));
+        || (isHost() && isHostExtendAllowed(resource.data, request.resource.data))
+        || isKioskVisitCheckInAllowed(resource.data, request.resource.data)
+        || isKioskRegistrationFlagAllowed(resource.data, request.resource.data);
       // Audit integrity: visit records are never deleted by day-to-day staff.
       allow delete: if isSuperAdmin();
     }
 
     // ----- Frequent-visitor profiles -----
-    // Staff manage the profile directory (which contains facial/profile data).
-    // A Host may read profiles to reuse an existing one and may create a new
-    // host-owned profile (never with facial data). Unauthenticated visitors
-    // cannot read or write profiles.
+    // Staff manage the directory. Hosts may read/reuse profiles, create
+    // host-owned ones (photo allowed, capped), and bump visit counters.
+    // The logged-out badge screen may create a profile via the strict kiosk
+    // shape. Reads stay authenticated-only; updates never widen access.
     match /frequentVisitors/{id} {
       allow read: if isStaff() || isHost();
       allow create: if isStaff()
-        || (isHost() && isHostProfileCreateAllowed(request.resource.data));
-      allow update, delete: if isStaff();
+        || (isHost() && isHostProfileCreateAllowed(request.resource.data))
+        || isKioskProfileCreateAllowed(request.resource.data);
+      allow update: if isStaff()
+        || (isHost() && isFrequentCounterUpdateAllowed(resource.data, request.resource.data));
+      allow delete: if isStaff();
     }
 
     // ----- Staff-only directories -----
@@ -207,16 +368,17 @@ service cloud.firestore {
     }
 
     // ----- Users / roles -----
-    // A user may read their own record; Super Admins manage everyone.
-    // The first Super Admin must be created in the Firebase Console
-    // (Authentication -> Add user, then Firestore -> users/<uid> with
-    // role "super-admin"). In-app signups can only create Receptionists,
-    // so no account can ever elevate its own role.
+    // A user may read their own record (checked first so bootstrap never
+    // depends on reading a role doc that does not exist yet); Super Admins
+    // manage everyone. The first Super Admin must be created in the Firebase
+    // Console (Authentication -> Add user, then Firestore -> users/<uid> with
+    // role "super-admin"). In-app signups create Receptionist/Host only,
+    // so no account can ever elevate itself to super-admin.
     match /users/{uid} {
-      allow read: if isSignedIn() && (isSuperAdmin() || uid == request.auth.uid);
+      allow read: if isSignedIn() && (uid == request.auth.uid || isSuperAdmin());
       allow create: if isSignedIn()
         && uid == request.auth.uid
-        && request.resource.data.role == 'receptionist';
+        && request.resource.data.role in ['receptionist', 'host'];
       allow update, delete: if isSuperAdmin();
     }
   }

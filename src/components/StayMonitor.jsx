@@ -14,12 +14,15 @@ const EXPIRED_MESSAGE_HOST = 'Visitor duration has been exceeded.';
 
 const StayMonitor = () => {
   const running = useRef(false);
-  const { user } = useAuth();
+  const { user, role } = useAuth();
 
   useEffect(() => {
-    // Only staff with a signed-in session may update the reminders; run the
-    // monitor just for them so the kiosk does not trigger permission errors.
+    // Only staff with a signed-in session may read/update the reminders; the
+    // kiosk (logged out, or signed in as host) cannot list all visits under
+    // the security rules, so the monitor stays idle there instead of
+    // spamming permission-denied errors.
     if (!user) return undefined;
+    if (role !== null && !['super-admin', 'receptionist', 'security-officer'].includes(role)) return undefined;
     if (!isEmailConfigured()) {
       console.warn('StayMonitor: EmailJS is not configured — reminders and expiry alerts are disabled.');
     }
@@ -70,7 +73,7 @@ const StayMonitor = () => {
     runCheck();
     const interval = setInterval(runCheck, CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, role]);
 
   return null;
 };

@@ -576,16 +576,17 @@ const CheckInForm = ({ onCheckInSuccess }) => {
     } catch (err) {
       console.error("Error during check-in: ", err);
       const code = err?.code || '';
+      const detail = err?.message ? ` (${code || 'error'}: ${err.message})` : '';
       setError(
         code === 'permission-denied'
-          ? "Check-in was blocked: Firestore security rules deny this write. Ask your administrator to deploy firestore.rules."
+          ? `Check-in was blocked: Firestore security rules deny this write${detail}. If rules were just deployed, wait ~60s and retry.`
           : code === 'not-found'
             ? "Check-in failed: the Firestore database is not provisioned for this Firebase project."
             : /timed out/i.test(err?.message || '')
               ? "Check-in failed: the Firestore write timed out. Enable the Cloud Firestore API, create the database for this Firebase project, and deploy firestore.rules, then retry."
               : code === 'unavailable' || /network/i.test(err?.message || '')
                 ? "Check-in failed: the connection was lost. Check your internet connection and try again."
-                : "Failed to check in. Please try again."
+                : `Failed to check in. Please try again.${detail}`
       );
     } finally {
       setLoading(false);
