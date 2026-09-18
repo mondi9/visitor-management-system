@@ -178,7 +178,7 @@ const HostRegisterVisitor = () => {
         type: 'visitor',
         profileId,
         registeredBy: user.uid,
-        hostId: null,
+        hostId: user.uid,
         hostName,
         hostEmail,
         registrationTime: serverTimestamp(),

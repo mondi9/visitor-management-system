@@ -135,6 +135,7 @@ service cloud.firestore {
           'registeredBy',
           'status',
           'type',
+          'hostId',
         ])
         && (!('photoUrl' in newData) || newData.photoUrl == null)
         && (!('facialVerificationStatus' in newData) || newData.facialVerificationStatus == null)
@@ -307,9 +308,10 @@ service cloud.firestore {
         || (isHost() && isHostRegistrationCreateAllowed(request.resource.data))
         || isKioskVisitorCreateAllowed(request.resource.data);
       // Staff see every visit (badge lookup at reception); a Host sees only
-      // the visits they registered.
+      // the visits they registered (matched by registeredBy or hostId).
       allow read: if isStaff()
-        || (isHost() && resource.data.registeredBy == request.auth.uid);
+        || (isHost() && (resource.data.registeredBy == request.auth.uid
+          || resource.data.hostId == request.auth.uid));
       // Staff may progress a visit (reception face-capture check-in, extend,
       // reminders, check-out, verification) but only within the allowed
       // lifecycle and field set. A Host may only mark their pre-registration

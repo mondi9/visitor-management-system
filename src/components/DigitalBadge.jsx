@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, Calendar, User, Briefcase, ArrowLeft, Star, Loader2, Clock, AlertTriangle } from 'lucide-react';
+import { CheckCircle, Calendar, User, Briefcase, ArrowLeft, Star, Loader2, Clock, AlertTriangle, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { db } from '../firebase';
 import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
@@ -185,13 +185,65 @@ const DigitalBadge = ({ visitor, onBack }) => {
             <span>{saved ? 'Saved as Frequent Visitor ✓' : 'Save as Frequent Visitor'}</span>
           </button>
 
-          <div className="flex gap-3">
+<div className="flex gap-3">
             <button
               onClick={() => window.print()}
-              className="flex-1 py-4 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center space-x-2 transition-all transform active:scale-95 shadow-lg shadow-indigo-200/30"
+              className="flex-1 py-4 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center transition-all transform active:scale-95 shadow-lg shadow-indigo-200/30"
             >
               <CheckCircle size={18} />
               <span>Print Badge</span>
+            </button>
+            <button
+              onClick={() => {
+                const name = visitor.name || '—';
+                const badgeNumber = visitor.badgeNumber || '—';
+                const hostName = visitor.hostName || '—';
+                const purpose = visitor.purpose || '—';
+                const arrivalTime = visitor.checkInTime ? format(visitor.checkInTime, 'MMM d, h:mm a') : format(visitor.expectedArrivalTime, 'MMM d, h:mm a');
+                const duration = visitor.duration || '—';
+                const company = visitor.company || '—';
+                const passWindow = window.open('', '_blank', 'width=800,height=600');
+                passWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @page { size: A4; margin: 20mm; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: white; }
+    .pass { max-width: 210mm; margin: 0 auto; border: 2px solid #0B192C; border-radius: 8px; padding: 30px; background: #fff; }
+    .header { text-align: center; border-bottom: 2px solid #0B192C; padding-bottom: 20px; margin-bottom: 20px; }
+    .badge-number { font-size: 24px; font-weight: bold; color: #0B192C; margin: 20px 0; }
+    .visitor-info { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+    .info-row { margin-bottom: 8px; }
+    .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+    .value { font-size: 16px; font-weight: 500; }
+    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="pass">
+    <div class="header">
+      <h1 style="font-size: 28px; color: #0B192C; margin: 0;">VISITOR PASS</h1>
+    </div>
+    <div class="badge-number">${badgeNumber}</div>
+    <div class="visitor-info">
+      <div class="info-row"><span class="label">Visitor</span><span class="value">${name}</span></div>
+      <div class="info-row"><span class="label">Host</span><span class="value">${hostName}</span></div>
+      <div class="info-row"><span class="label">Purpose</span><span class="value">${purpose}</span></div>
+      <div class="info-row"><span class="label">Company</span><span class="value">${company}</span></div>
+      <div class="info-row"><span class="label">Date & Time</span><span class="value">${arrivalTime}</span></div>
+      <div class="info-row"><span class="label">Duration</span><span class="value">${duration}</span></div>
+    </div>
+    <div class="footer">
+      <p>Visitor Management System • Present this pass at reception</p>
+    </div>
+  </div>
+</body>
+</html>`);
+              }}
+              className="flex-1 py-4 px-6 bg-[#0B192C] hover:bg-[#14294a] text-white font-bold rounded-xl flex items-center justify-center transition-all transform active:scale-95 shadow-lg"
+            >
+              <Download size={18} /> Visitor Pass
             </button>
             <button
               onClick={onBack}
